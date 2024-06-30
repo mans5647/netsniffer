@@ -1,0 +1,6 @@
+#ifndef PROPERTYINFO_H
+#define PROPERTYINFO_H
+
+
+
+#endif // PROPERTYINFO_H
