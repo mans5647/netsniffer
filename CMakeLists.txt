@@ -12,6 +12,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Widgets)
 find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets)
 
+# !add folder for linux pcap
+
 set(USER_PERSONAL_APPDATA_DIR "$ENV{USERPROFILE}\\AppData\\Local")
 set(PCAP_GENERAL_FOLDER "${USER_PERSONAL_APPDATA_DIR}\\npcap-sdk")
 set(PCAP_INCLUDE_FOLDER "${PCAP_GENERAL_FOLDER}\\Include")
@@ -25,8 +27,8 @@ set(CMAKE_AUTOUIC_SEARCH_PATHS ${UI_PATH})
 
 
 
-set(APP_BINARY_DIR "${USER_PERSONAL_APPDATA_DIR}\\netsniffer")
-set(ICONS_DIR "${CMAKE_SOURCE_DIR}\\icons")
+set(APP_BINARY_DIR "${USER_PERSONAL_APPDATA_DIR}/netsniffer")
+set(ICONS_DIR "${CMAKE_SOURCE_DIR}/icons")
 
 
 set(HEX_VIEW_DIR ${CMAKE_CURRENT_SOURCE_DIR}/QHexView)
@@ -120,7 +122,7 @@ endif()
 target_include_directories(NetSniffer PRIVATE ${PCAP_INCLUDE_FOLDER})
 target_link_libraries(NetSniffer PRIVATE Qt${QT_VERSION_MAJOR}::Widgets ${PCAP_LIB_FOLDER}Packet.lib ${PCAP_LIB_FOLDER}wpcap.lib)
 
-include(../OwnHexView/CMakeLists.txt)
+include(QHexView/CMakeLists.txt)
 
 
 target_link_libraries(NetSniffer PRIVATE ${CMAKE_SOURCE_DIR}/build/OwnHexView.lib)

@@ -53,3 +53,9 @@ compile_commands.json
 *creator.user*
 
 *_qmlcache.qrc
+
+.qt/
+CMakeCache.txt
+CMakeFiles/
+_deps/
+cmake_install.cmake
