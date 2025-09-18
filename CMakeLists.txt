@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 3.5)
 
-project(NetSniffer VERSION 0.1 LANGUAGES CXX)
+project(
+  NetSniffer
+  VERSION 0.1
+  LANGUAGES CXX)
 
 set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTOMOC ON)
@@ -9,147 +12,170 @@ set(CMAKE_AUTORCC ON)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Widgets)
-find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets)
+if(WIN32)
+  set(USER_PERSONAL_APPDATA_DIR "$ENV{USERPROFILE}\\AppData\\Local")
+elseif(UNIX)
 
-# !add folder for linux pcap
+  set(USER_PERSONAL_APPDATA_DIR "/home/")
 
-set(USER_PERSONAL_APPDATA_DIR "$ENV{USERPROFILE}\\AppData\\Local")
-set(PCAP_GENERAL_FOLDER "${USER_PERSONAL_APPDATA_DIR}\\npcap-sdk")
-set(PCAP_INCLUDE_FOLDER "${PCAP_GENERAL_FOLDER}\\Include")
-set(PCAP_LIB_FOLDER "${PCAP_GENERAL_FOLDER}\\Lib\\x64\\")
+  execute_process(
+    COMMAND "whoami"
+    RESULT_VARIABLE USERNAME_RESULT
+    OUTPUT_VARIABLE USERNAME
+    OUTPUT_STRIP_TRAILING_WHITESPACE)
+
+  if(NOT USERNAME_RESULT EQUAL 0)
+    message(FATAL_ERROR "Failed to get username")
+  endif()
+
+  string(CONCAT USER_PERSONAL_APPDATA_DIR ${USER_PERSONAL_APPDATA_DIR}
+                ${USERNAME})
+
+endif()
 
 set(SOURCE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/src)
+set(HEADER_PATH ${CMAKE_CURRENT_SOURCE_DIR}/include)
 set(UI_PATH ${SOURCE_PATH}/ui)
-
-set(CMAKE_BUILD_TYPE Debug)
 set(CMAKE_AUTOUIC_SEARCH_PATHS ${UI_PATH})
-
-
-
-set(APP_BINARY_DIR "${USER_PERSONAL_APPDATA_DIR}/netsniffer")
+set(CMAKE_INSTALL_PREFIX "${USER_PERSONAL_APPDATA_DIR}/netsniffer")
 set(ICONS_DIR "${CMAKE_SOURCE_DIR}/icons")
-
-
 set(HEX_VIEW_DIR ${CMAKE_CURRENT_SOURCE_DIR}/QHexView)
 set(INCLUDE_MEMORY_BUF ${HEX_VIEW_DIR}/document/buffer)
 
 set(PROJECT_SOURCES
-        ${SOURCE_PATH}/main.cpp
-        ${SOURCE_PATH}/mainwindow.cpp
-        ${SOURCE_PATH}/mainwindow.h
-        ${UI_PATH}/mainwindow.ui
-        ${UI_PATH}/if_choose.ui
-        ${SOURCE_PATH}/if_choose.cpp
-        ${SOURCE_PATH}/if_choose.h
-        ${SOURCE_PATH}/if_loader.cpp
-        ${SOURCE_PATH}/if_loader.h
-        ${SOURCE_PATH}/helpers.h
-        ${SOURCE_PATH}/InterfaceManager.cpp
-        ${SOURCE_PATH}/InterfaceManager.h
-        ${SOURCE_PATH}/interface_widget.h
-        ${SOURCE_PATH}/interface_widget.cpp
-        ${SOURCE_PATH}/sessionmanager.h
-        ${SOURCE_PATH}/sessionmanager.cpp
-        ${SOURCE_PATH}/ether.h
-        ${SOURCE_PATH}/macros.h
-        ${SOURCE_PATH}/proto.h
-        ${SOURCE_PATH}/proto_list.h
-        ${SOURCE_PATH}/proto_util.h
-        ${SOURCE_PATH}/types.h
-    )
+    ${SOURCE_PATH}/main.cpp
+    ${SOURCE_PATH}/mainwindow.cpp
+    # ${UI_PATH}/mainwindow.ui ${UI_PATH}/if_choose.ui
+    ${SOURCE_PATH}/if_choose.cpp
+    ${SOURCE_PATH}/if_loader.cpp
+    ${SOURCE_PATH}/InterfaceManager.cpp
+    ${SOURCE_PATH}/interface_widget.cpp
+    ${SOURCE_PATH}/sessionmanager.cpp
+    ${SOURCE_PATH}/packet_row.cpp
+    ${SOURCE_PATH}/protocolparser.cpp
+    ${SOURCE_PATH}/interfacerow.cpp
+    ${SOURCE_PATH}/dns_utils.cpp
+    ${SOURCE_PATH}/helpers.cpp
+    ${SOURCE_PATH}/packettablemodel.cpp
+    ${SOURCE_PATH}/protocoldetailtab.cpp
+    ${SOURCE_PATH}/keyvaluepairwidget.cpp
+    ${SOURCE_PATH}/uihelpers.cpp
+    ${SOURCE_PATH}/hexview.cpp
+    ${SOURCE_PATH}/sortingproxymodel.cpp
+    ${SOURCE_PATH}/displayfilter.cpp
+    ${SOURCE_PATH}/metainfopanel.cpp
+    ${SOURCE_PATH}/ethernet.cpp
+    ${SOURCE_PATH}/dnsquestionentry.cpp
+    ${SOURCE_PATH}/dnsrecordssection.cpp
+    ${SOURCE_PATH}/dnsanswerentry.cpp
+    ${SOURCE_PATH}/pairfield.cpp
+    ${SOURCE_PATH}/fieldinformationmodel.cpp
+    ${SOURCE_PATH}/capturesettingsdialog.cpp
+    ${SOURCE_PATH}/interfaceview.cpp
+    ${SOURCE_PATH}/interfacemodel.cpp
+    ${SOURCE_PATH}/interfaceitem.cpp
+    ${SOURCE_PATH}/httpparser.cpp
+    ${SOURCE_PATH}/httprequest.cpp
+    ${SOURCE_PATH}/filesettingsview.cpp)
 
+set(PROJECT_HEADERS
+    ${HEADER_PATH}/ether.h
+    ${HEADER_PATH}/macros.h
+    ${HEADER_PATH}/proto.h
+    ${HEADER_PATH}/proto_list.h
+    ${HEADER_PATH}/proto_util.h
+    ${HEADER_PATH}/types.h
+    ${HEADER_PATH}/sessionmanager.h
+    ${HEADER_PATH}/InterfaceManager.h
+    ${HEADER_PATH}/interface_widget.h
+    ${HEADER_PATH}/if_loader.h
+    ${HEADER_PATH}/helpers.h
+    ${HEADER_PATH}/if_choose.h
+    ${HEADER_PATH}/mainwindow.h
+    ${HEADER_PATH}/packet_row.h
+    ${HEADER_PATH}/sm_fwd.h
+    ${HEADER_PATH}/protocolparser.h
+    ${HEADER_PATH}/interfacerow.h
+    ${HEADER_PATH}/ports.h
+    ${HEADER_PATH}/dns.h
+    ${HEADER_PATH}/dns_utils.h
+    ${HEADER_PATH}/packettablemodel.h
+    ${HEADER_PATH}/protocoldetailtab.h
+    ${HEADER_PATH}/keyvaluepairwidget.h
+    ${HEADER_PATH}/protocolPropertyNames.h
+    ${HEADER_PATH}/PropertyInfo.h
+    ${HEADER_PATH}/TabInfo.h
+    ${HEADER_PATH}/uihelpers.h
+    ${HEADER_PATH}/hexview.h
+    ${HEADER_PATH}/sortingproxymodel.h
+    ${HEADER_PATH}/displayfilter.h
+    ${HEADER_PATH}/metainfopanel.h
+    ${HEADER_PATH}/ethernet.h
+    ${HEADER_PATH}/dnsquestionentry.h
+    ${HEADER_PATH}/dnsrecordssection.h
+    ${HEADER_PATH}/dnsanswerentry.h
+    ${HEADER_PATH}/pairfield.h
+    ${HEADER_PATH}/fieldinformationmodel.h
+    ${HEADER_PATH}/capturesettingsdialog.h
+    ${HEADER_PATH}/interfaceview.h
+    ${HEADER_PATH}/interfacemodel.h
+    ${HEADER_PATH}/interfaceitem.h
+    ${HEADER_PATH}/httpparser.h
+    ${HEADER_PATH}/httprequest.h
+    ${HEADER_PATH}/filesettingsview.h)
 
+set(PROJECT_UI_FILES "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/mainwindow.ui"
+                     "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/if_choose.ui")
+
+set(QT_CREATOR_SKIP_MAINTENANCE_TOOL_PROVIDER ON)
+
+find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Widgets)
+find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets)
 
 if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
-    qt_add_executable(NetSniffer
-        MANUAL_FINALIZATION
-        ${PROJECT_SOURCES}
-        src/packet_row.h src/packet_row.cpp
-        src/sm_fwd.h
-        src/protocolparser.h src/protocolparser.cpp
-        src/interfacerow.h src/interfacerow.cpp
-        src/ports.h
-        src/dns.h
-        src/dns_utils.h src/dns_utils.cpp
-        src/helpers.cpp
-        src/packettablemodel.h src/packettablemodel.cpp
-        src/protocoldetailtab.h src/protocoldetailtab.cpp
-        src/keyvaluepairwidget.h src/keyvaluepairwidget.cpp
-        src/protocolPropertyNames.h
-        src/PropertyInfo.h
-        src/TabInfo.h
-        src/uihelpers.h src/uihelpers.cpp
-        src/hexview.h src/hexview.cpp
-        src/sortingproxymodel.h src/sortingproxymodel.cpp
-        src/displayfilter.h src/displayfilter.cpp
-        src/metainfopanel.h src/metainfopanel.cpp
-        src/ethernet.h src/ethernet.cpp
-        src/dnsquestionentry.h src/dnsquestionentry.cpp
-        src/dnsrecordssection.h src/dnsrecordssection.cpp
-        src/dnsanswerentry.h src/dnsanswerentry.cpp
-        src/pairfield.h src/pairfield.cpp
-        src/fieldinformationmodel.h src/fieldinformationmodel.cpp
-        src/capturesettingsdialog.h src/capturesettingsdialog.cpp
-        src/interfaceview.h src/interfaceview.cpp
-        src/interfacemodel.h src/interfacemodel.cpp
-        src/interfaceitem.h src/interfaceitem.cpp
-        src/httpparser.h src/httpparser.cpp
-        src/httprequest.h src/httprequest.cpp
-        src/filesettingsview.h src/filesettingsview.cpp
-
-
-
-    )
-# Define target properties for Android with Qt 6 as:
-#    set_property(TARGET NetSniffer APPEND PROPERTY QT_ANDROID_PACKAGE_SOURCE_DIR
-#                 ${CMAKE_CURRENT_SOURCE_DIR}/android)
-# For more information, see https://doc.qt.io/qt-6/qt-add-executable.html#target-creation
+  qt_add_executable(
+    NetSniffer
+    MANUAL_FINALIZATION
+    ${PROJECT_SOURCES}
+    ${PROJECT_HEADERS}
+    ${PROJECT_UI_FILES}
+    src/ui/packetgeneralinfotab.h
+    src/ui/packetgeneralinfotab.cpp
+    src/ui/packetgeneralinfotab.ui
+    src/ui/packetethernetinfotab.h
+    src/ui/packetethernetinfotab.cpp
+    src/ui/packetethernetinfotab.ui
+    src/ui/packetipv4infotab.h
+    src/ui/packetipv4infotab.cpp
+    src/ui/packetipv4infotab.ui
+    src/ui/packetarpinfotab.h
+    src/ui/packetarpinfotab.cpp
+    src/ui/packetarpinfotab.ui
+    src/ui/packettcpinfotab.h
+    src/ui/packettcpinfotab.cpp
+    src/ui/packettcpinfotab.ui
+    src/ui/packetudpinfotab.h
+    src/ui/packetudpinfotab.cpp
+    src/ui/packetudpinfotab.ui
+    src/ui/packeticmpinfotab.h
+    src/ui/packeticmpinfotab.cpp
+    src/ui/packeticmpinfotab.ui
+    src/ui/packetdnsinfotab.h
+    src/ui/packetdnsinfotab.cpp
+    src/ui/packetdnsinfotab.ui)
 else()
-    if(ANDROID)
-        add_library(NetSniffer SHARED
-            ${PROJECT_SOURCES}
-        )
-# Define properties for Android with Qt 5 after find_package() calls as:
-#    set(ANDROID_PACKAGE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/android")
-    else()
-        add_executable(NetSniffer
-            ${PROJECT_SOURCES}
-        )
-    endif()
+  add_executable(NetSniffer ${PROJECT_SOURCES} ${PROJECT_HEADERS})
 endif()
 
-target_include_directories(NetSniffer PRIVATE ${PCAP_INCLUDE_FOLDER})
-target_link_libraries(NetSniffer PRIVATE Qt${QT_VERSION_MAJOR}::Widgets ${PCAP_LIB_FOLDER}Packet.lib ${PCAP_LIB_FOLDER}wpcap.lib)
-
-include(QHexView/CMakeLists.txt)
-
-
-target_link_libraries(NetSniffer PRIVATE ${CMAKE_SOURCE_DIR}/build/OwnHexView.lib)
-target_include_directories(NetSniffer PRIVATE ${OWN_INCLUDE})
-
-include(FetchContent)
-
-set(CMAKE_INSTALL_PREFIX ${INSTALL_FOLDER_NAME})
-# LLHttp library for HTTP parse
-FetchContent_Declare(
-  llhttp
-  GIT_REPOSITORY https://github.com/nodejs/llhttp.git
-  GIT_TAG       610a87d755f6bae466cd871c2ba97574ccac5483
-)
-
-FetchContent_MakeAvailable(llhttp)
-
-# target_link_libraries(${PROJECT_NAME} PRIVATE llhttp::llhttp)
-include_directories(${PROJECT_NAME} PUBLIC ${llhttp_SOURCE_DIR}/include)
-target_link_libraries(NetSniffer PRIVATE llhttp_shared)
-
-set(CMAKE_INSTALL_PREFIX ${APP_BINARY_DIR})
-install(TARGETS NetSniffer llhttp_shared
-        RUNTIME DESTINATION bin)
-
-install(DIRECTORY ${ICONS_DIR} DESTINATION ${CMAKE_INSTALL_PREFIX})
+include(cmake/FindPcap.cmake)
+add_subdirectory(QHexView)
 
 if(QT_VERSION_MAJOR EQUAL 6)
-    qt_finalize_executable(NetSniffer)
+  qt_finalize_executable(NetSniffer)
 endif()
+target_include_directories(NetSniffer PRIVATE ${HEADER_PATH})
+target_link_libraries(NetSniffer PRIVATE Qt6::Widgets)
+target_link_libraries(NetSniffer PRIVATE QHexView)
+target_link_libraries(NetSniffer PRIVATE pcap::pcap)
+
+message(STATUS "Default prefix for current user: ${CMAKE_INSTALL_PREFIX}")

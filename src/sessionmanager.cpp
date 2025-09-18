@@ -8,44 +8,55 @@
 #include <algorithm>
 #include <QFileDialog>
 #include <QDir>
+#include <pcap/pcap.h>
 #include "packettablemodel.h"
-#include "myhexview.h"
 #include "sortingproxymodel.h"
 #include "ui_mainwindow.h"
 
+#define MSG_BOX_ERROR_SHOW(title, err) QMessageBox{QMessageBox::Icon::Critical, title, err}.exec();
+#define MSG_BOX_INFO_SHOW(title, text) QMessageBox{QMessageBox::Icon::Information, title, text}.exec();
 
 
 SessionManager * SessionManager::instance;
 
+SessionManager * SessionManager::getInstance()
+{
+    if (!instance)
+    {
+        instance = new SessionManager();
+    }
+    return instance;
+}
+
 SessionManager::SessionManager()
 {
-    saveChanges = new QMessageBox();
-    saveChanges->setInformativeText("Вы хотите сохранить ранее захваченные пакеты?");
-    saveChanges->setStandardButtons(QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel);
-    m_interface = nullptr;
-    capturing_handle = nullptr;
-    fileDumper = nullptr;
-    framesModel = new PacketTableModel();
-    mtx = new QMutex();
-    mf_dialog = new QFileDialog();
-    mf_dialog->setFileMode(QFileDialog::Directory);
-    mf_dialog->setWindowTitle(QObject::tr("Выберите папку для сохранения ..."));
-    cpt_thread = nullptr;
-    saveFile = false;
-    readThread = nullptr;
+    save_changes_msgbox = new QMessageBox();
+    save_changes_msgbox->setInformativeText("Вы хотите сохранить ранее захваченные пакеты?");
+    save_changes_msgbox->setStandardButtons(QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel);
+    current_interface = nullptr;
+    capture_handle = nullptr;
+    file_dumper = nullptr;
+    packets = new PacketTableModel();
+    file_dialog = new QFileDialog();
+    file_dialog->setFileMode(QFileDialog::Directory);
+    file_dialog->setWindowTitle(QObject::tr("Выберите папку для сохранения ..."));
+    capture_thread = nullptr;
+    save_to_file = false;
+    read_thread = nullptr;
 
 }
 
-void SessionManager::capture_thread(pcap_t** handle)
+void SessionManager::doCaptureLoop()
 {
     int res;
     pcap_pkthdr *hdr;
     const uint8_t * data;
 
 
-    static int f_num;
-    f_num = 1;
-    while ((res = pcap_next_ex(*handle, &hdr, &data)) >= 0)
+    int frameId;
+    frameId = 1;
+    ProtocolParser parser;
+    while ((res = pcap_next_ex(capture_handle, &hdr, &data)) >= 0)
     {
         if (QThread::currentThread()->isInterruptionRequested())
         {
@@ -54,27 +65,17 @@ void SessionManager::capture_thread(pcap_t** handle)
 
         if (res == 0) continue;
 
-        pcap_dump((uint8_t*)fileDumper, hdr, data);
-        FrameInfo frame{};
+        pcap_dump(reinterpret_cast<uint8_t*>(file_dumper), hdr, data);
 
-        const char *m_ptr = (const char*)data;
-        frame.alt_time = hdr->ts.tv_usec;
+        std::optional<Packet> packet_o = parser.Parse(frameId, hdr, data);
 
-        frame.copy = QByteArray(m_ptr, hdr->caplen);
-        frame.total_length = hdr->len;
+        if (!packet_o.has_value()) {
+            continue;
+        }
 
-        frame.cap_len = hdr->caplen;
-        frame.f_num = f_num;
-
-        frame.recv_time = hdr->ts.tv_sec;
-        frame.p_ref = new Packet{};
-
-        ParseFrame(&frame, data);
-        framesModel->append(frame);
-
-
-        emit countUpdated();
-        f_num++;
+        packets->append(*packet_o);
+        emit CountUpdated();
+        frameId++;
     }
 
 
@@ -85,222 +86,230 @@ void SessionManager::capture_thread(pcap_t** handle)
 void SessionManager::StartCapture()
 {
 
-    if (capturing_handle)
+    if (capture_handle)
+        pcap_close(capture_handle);
+
+    if (file_dumper)
+        pcap_dump_close(file_dumper);
+
+    if (!packets->isEmpty())
     {
-        pcap_close(capturing_handle);
+        switch (save_changes_msgbox->exec())
+        {
+            case QMessageBox::Save:
+            {
+                SaveCaptureFile();
+                RemoveTempFile();
+                break;
+            }
+            case QMessageBox::Discard:
+            {
+                RemoveTempFile();
+                break;
+            }
+            case QMessageBox::Cancel:
+                return;
+        }
     }
 
-    opendevice();
-
-    if (fileDumper) pcap_dump_close(fileDumper);
-
-    if (saveFile)
-    {
-        FreeResources();
-        saveFile = false;
-    }
-
-    if (!saveFile && framesModel->rowCount() > 0)
-    {
-        LiveCapture();
-    }
-    else open_new_session();
+    FreeResources();
+    OpenNewSession();
 }
 
 
 bool SessionManager::IsOpened()
 {
-    return (capturing_handle) ? true : false;
+    return (capture_handle) ? true : false;
 }
 
 
 
 
-void SessionManager::ParseFrame(FrameInfo * frame, const uint8_t * data)
-{
+// void SessionManager::parseFrame(FrameInfo * frame, const uint8_t * data)
+// {
 
-    ether_header * ether = (ether_header*)data;
-    Ethernet ethernet{ether};
+//     ether_header * ether = (ether_header*)data;
+//     Ethernet ethernet{ether};
 
-    frame->p_ref->setEthernet(ethernet);
+//     frame->p_ref->setEthernet(ethernet);
 
-    bool __continue = Ethernet::hasNextProtocol(frame->p_ref->getEthernet());
+//     bool __continue = Ethernet::hasNextProtocol(frame->p_ref->getEthernet());
 
-    if (!__continue) return;
+//     if (!__continue) return;
 
-    const uint8_t * payload_data;
-    int payload_size = 0;
-    ParseNetworkLayer(frame, (data + ETH_HEADER_SIZE));
-    ParseTransportLayer(frame, (data + ETH_HEADER_SIZE));
-
-
-    ProtocolHolder* last = frame->p_ref->Last();
-
-    uint16_t transport_header_size = 0;
-    uint16_t net_header_size = 0;
-
-    switch (last->type)
-    {
-    case CurrentTCP:
-    {
-        transport_header_size = last->tcp_header.ExtractHeaderSize();
-
-        break;
-    }
-    case CurrentUDP:
-    {
-        transport_header_size = last->udp_header.GetHeaderSize();
-        break;
-    }
-    }
-
-    auto first = frame->p_ref->First();
-    auto net_layer = GetNetLayerProto(&first);
-
-    if (net_layer->type == CurrentIPv4)
-    {
-        net_header_size = net_layer->IP4_header.ExtractIHL() * 4;
-    }
-
-    payload_size = GetPayloadSize(net_layer,net_header_size, transport_header_size, net_layer->type);
-
-    if (payload_size > 0)
-    {
-        payload_data = (data + ETH_HEADER_SIZE + net_header_size + transport_header_size);
-        uint16_t sport = 0, dport = 0, maybe_wellknown_port = 0;
-        switch (last->type)
-        {
-        case CurrentTCP:
-        {
-            last->tcp_header.SetPayloadLength(payload_size);
-            sport = last->tcp_header.ExtractSPort();
-            dport = last->udp_header.ExtractDPort();
-            break;
-        }
-        case CurrentUDP:
-        {
-            last->udp_header.SetPayloadLength(payload_size);
-            sport = last->udp_header.ExtractSPort();
-            dport = last->udp_header.ExtractDPort();
-            break;
-        }
-        }
+//     const uint8_t * payload_data;
+//     int payload_size = 0;
+//     parseNetworkLayer(frame, (data + ETH_HEADER_SIZE));
+//     parseTransportLayer(frame, (data + ETH_HEADER_SIZE));
 
 
-        maybe_wellknown_port = std::min(sport, dport);
-        ParseApplicationLayerProto(frame, payload_data, maybe_wellknown_port);
-    }
+//     ProtocolHolder* last = frame->p_ref->Last();
+
+//     uint16_t transport_header_size = 0;
+//     uint16_t net_header_size = 0;
+
+//     switch (last->type)
+//     {
+//     case CurrentTCP:
+//     {
+//         transport_header_size = last->tcp_header.ExtractHeaderSize();
+
+//         break;
+//     }
+//     case CurrentUDP:
+//     {
+//         transport_header_size = last->udp_header.GetHeaderSize();
+//         break;
+//     }
+//     }
+
+//     auto first = frame->p_ref->First();
+//     auto net_layer = GetNetLayerProto(&first);
+
+//     if (net_layer->type == CurrentIPv4)
+//     {
+//         net_header_size = net_layer->IP4_header.ExtractIHL() * 4;
+//     }
+
+//     payload_size = GetPayloadSize(net_layer,net_header_size, transport_header_size, net_layer->type);
+
+//     if (payload_size > 0)
+//     {
+//         payload_data = (data + ETH_HEADER_SIZE + net_header_size + transport_header_size);
+//         uint16_t sport = 0, dport = 0, maybe_wellknown_port = 0;
+//         switch (last->type)
+//         {
+//         case CurrentTCP:
+//         {
+//             last->tcp_header.SetPayloadLength(payload_size);
+//             sport = last->tcp_header.ExtractSPort();
+//             dport = last->udp_header.ExtractDPort();
+//             break;
+//         }
+//         case CurrentUDP:
+//         {
+//             last->udp_header.SetPayloadLength(payload_size);
+//             sport = last->udp_header.ExtractSPort();
+//             dport = last->udp_header.ExtractDPort();
+//             break;
+//         }
+//         }
 
 
-}
+//         maybe_wellknown_port = std::min(sport, dport);
+//         parseApplicationLayerProto(frame, payload_data, maybe_wellknown_port);
+//     }
 
-ether_header SessionManager::ParseEthernetHeader(const uint8_t * data)
+
+// }
+
+ether_header SessionManager::parseEthernetHeader(const uint8_t * data)
 {
     return *(ether_header*)(data);
 }
 
-void SessionManager::ParseNetworkLayer(FrameInfo * frame, const uint8_t * data)
-{
-    auto EtherType = frame->p_ref->getEthernet().getEtherType();
+// void SessionManager::parseNetworkLayer(FrameInfo * frame, const uint8_t * data)
+// {
+//     auto EtherType = frame->p_ref->getEthernet().getEtherType();
 
 
-    switch (EtherType)
-    {
-    case H_PROTO_IP4:
-    {
-        ProtocolParser::ParseIP4(frame->p_ref,data);
-        break;
-    }
-    case H_PROTO_ARP:
-    {
-        ProtocolParser::ParseARP(frame->p_ref, data);
-        break;
-    }
-    case H_PROTO_IP6:
-    {
-        ProtocolParser::ParseIP6(frame->p_ref, data);
-        break;
-    }
-    }
-}
+//     switch (EtherType)
+//     {
+//     case H_PROTO_IP4:
+//     {
+//         ProtocolParser::ParseIP4(frame->p_ref,data);
+//         break;
+//     }
+//     case H_PROTO_ARP:
+//     {
+//         ProtocolParser::ParseARP(frame->p_ref, data);
+//         break;
+//     }
+//     case H_PROTO_IP6:
+//     {
+//         ProtocolParser::ParseIP6(frame->p_ref, data);
+//         break;
+//     }
+//     }
+// }
 
-void SessionManager::ParseTransportLayer(FrameInfo * frame, const uint8_t * data)
-{
-    ProtocolHolder * head = frame->p_ref->First();
+// void SessionManager::parseTransportLayer(FrameInfo * frame, const uint8_t * data)
+// {
+//     ProtocolHolder * head = frame->p_ref->First();
 
-    auto holder = GetNetLayerProto(&head);
+//     auto holder = GetNetLayerProto(&head);
 
-    switch (holder->type)
-    {
-        case CurrentIPv4:
-        {
-            auto headerSize = holder->IP4_header.ExtractIHL() * 4;
+//     switch (holder->type)
+//     {
+//         case CurrentIPv4:
+//         {
+//             auto headerSize = holder->IP4_header.ExtractIHL() * 4;
 
-            auto transport_layer_type = holder->IP4_header.ExtractNextProto();
+//             auto transport_layer_type = holder->IP4_header.ExtractNextProto();
 
-            if (transport_layer_type == TCP_NEXT)
-            {
-                ProtocolParser::ParseTCP(frame, (data + headerSize));
-            }
-            else if (transport_layer_type == UDP_NEXT)
-            {
-                ProtocolParser::ParseUDP(frame, (data + headerSize));
-            }
+//             if (transport_layer_type == TCP_NEXT)
+//             {
+//                 ProtocolParser::ParseTCP(frame, (data + headerSize));
+//             }
+//             else if (transport_layer_type == UDP_NEXT)
+//             {
+//                 ProtocolParser::ParseUDP(frame, (data + headerSize));
+//             }
 
-            else if (transport_layer_type == ICMP_NEXT)
-            {
-                ProtocolParser::ParseICMP(frame, (data + headerSize));
-            }
-
-
-            break;
-        }
-
-        case CurrentIPv6:
-        {
-            break;
-        }
+//             else if (transport_layer_type == ICMP_NEXT)
+//             {
+//                 ProtocolParser::ParseICMP(frame, (data + headerSize));
+//             }
 
 
-        case CurrentARP:
-        {
-            break;
-        }
-    }
-}
+//             break;
+//         }
 
-void SessionManager::ParseApplicationLayerProto(FrameInfo * frame, const uint8_t * payload, uint32_t minport)
-{
-    switch (minport)
-    {
-    case HTTP:
-    {
-        ProtocolParser::ParseHTTP(frame, payload);
-        break;
-    }
-    case HTTPS:
-    {
-        break;
-    }
-    case DNS:
-    {
-        ProtocolParser::ParseDNS(frame, payload);
-        break;
-    }
-    default:
-    {
+//         case CurrentIPv6:
+//         {
+//             break;
+//         }
 
-        break;
-    }
-    }
 
-}
+//         case CurrentARP:
+//         {
+//             break;
+//         }
+//     }
+// }
+
+// void SessionManager::parseApplicationLayerProto(FrameInfo * frame, const uint8_t * payload, uint32_t minport)
+// {
+//     switch (minport)
+//     {
+//     case HTTP:
+//     {
+//         ProtocolParser::ParseHTTP(frame, payload);
+//         break;
+//     }
+//     case HTTPS:
+//     {
+//         break;
+//     }
+//     case DNS:
+//     {
+//         ProtocolParser::ParseDNS(frame, payload);
+//         break;
+//     }
+//     default:
+//     {
+
+//         break;
+//     }
+//     }
+
+// }
 
 SessionManager::~SessionManager()
 {
-    pcap_close(capturing_handle);
-    delete saveChanges;
-    delete framesModel;
+    pcap_close(capture_handle);
+    delete save_changes_msgbox;
+    delete packets;
     delete instance;
 }
 
@@ -308,13 +317,9 @@ void SessionManager::LoadCaptureFile()
 {
     QString fname = QFileDialog::getOpenFileName(nullptr, tr("Выбрать файл .pcap"), QDir::current().path(),
                                                                         tr("TCPDump/Wireshark (*.pcap)"));
-    open_file_for_read(fname.toLatin1().constData());
+    openForRead(fname.toStdString().c_str());
 }
 
-void SessionManager::mock()
-{
-    qDebug() << "Finish";
-}
 
 bool SessionManager::RemoveTempFile()
 {
@@ -338,138 +343,117 @@ void SessionManager::SaveCaptureFile()
 
 void SessionManager::FreeResources()
 {
-    emit modelClearStarted();
-    framesModel->clear();
-    emit modelClearFinished();
-    if (cpt_thread)
+    emit ModelClearStarted();
+    packets->clear();
+    emit ModelClearFinished();
+    if (capture_thread)
     {
-        delete cpt_thread;
-        cpt_thread = nullptr;
+        delete capture_thread;
+        capture_thread = nullptr;
     }
 }
 
-void SessionManager::setFileWritePath(const QString &absolute_path)
+void SessionManager::SetDumpWritePath(const QString &absolute_path)
 {
     old_path = this->absolute_path;
     this->absolute_path = absolute_path;
 }
 
-QAbstractItemModel *SessionManager::getModel()
+QAbstractItemModel *SessionManager::GetPackets()
 {
-    return framesModel;
+    return packets;
 }
 
-void SessionManager::StopCapture(bool __unused)
+void SessionManager::StopCapture()
 {
-    Q_UNUSED(__unused)
-    if (cpt_thread) cpt_thread->requestInterruption();
-    emit statusChanged(CaptureStatus::Stopped);
+    if (capture_thread) capture_thread->requestInterruption();
+    emit StatusChanged(CaptureStatus::Stopped);
 }
 
-void SessionManager::opendevice()
+void SessionManager::OpenNewSession()
 {
-    if (m_interface)
-    {
-        capturing_handle = pcap_open(m_interface->getName().constData(), 65536, PCAP_OPENFLAG_PROMISCUOUS, 1000, nullptr, local_error_buf);
-    }
-}
+    capture_handle = pcap_open_live(current_interface->GetName().toStdString().c_str(), 65536, PCAP_OPENFLAG_PROMISCUOUS, 1000, pcap_error_buf);
 
-void SessionManager::open_new_session()
-{
-    if (fileDumper) pcap_dump_close(fileDumper);
-    fileDumper = pcap_dump_open(capturing_handle, absolute_path.toLatin1().constData());
-    auto type = pcap_datalink(capturing_handle);
-    cpt_thread = nullptr;
-    switch (type)
-    {
-    case DLT_NULL: break;
-    case DLT_EN10MB: cpt_thread = QThread::create(&SessionManager::capture_thread, this, &capturing_handle); break;
+
+    if (!capture_handle) {
+#ifdef QT_DEBUG
+        qDebug() << "Error while opening device at OpenNewSession(): " << pcap_error_buf;
+#else
+        MSG_BOX_ERROR_SHOW("Error opening device", pcap_error_buf)
+#endif
+
+        return;
     }
 
-    if (cpt_thread)
-    {
-        saveFile = false;
-        emit statusChanged(CaptureStatus::Started);
-        cpt_thread->start();
+    file_dumper = pcap_dump_open(capture_handle, absolute_path.toStdString().c_str());
+
+    if (!file_dumper) {
+#ifdef QT_DEBUG
+        qDebug() << "Error while opening dump at OpenNewSession()" <<
+                    pcap_error_buf;
+#else
+        MSG_BOX_ERROR_SHOW("Error opening dump file", pcap_error_buf)
+#endif
+        return;
     }
-}
 
-pcap_t *SessionManager::getOpenHandle()
-{
-    return capturing_handle;
-}
-
-void SessionManager::setInterface(const InterfaceItem **item)
-{
-    m_interface = (*item);
-}
-
-void SessionManager::LiveCapture()
-{
-    int action = saveChanges->exec();
-    switch (action)
+    capture_thread = nullptr;
+    switch (pcap_datalink(capture_handle))
     {
-    case QMessageBox::Save:
-    {
-
-        if (fileDumper)
-                pcap_dump_close(fileDumper);
-
-
-        SaveCaptureFile();
-
-        if (RemoveTempFile())
+        case DLT_EN10MB:
         {
-                qDebug() << "Temporary file " << absolute_path << "was removed ...";
-                emit fileRemoved();
+            capture_thread = QThread::create(&SessionManager::doCaptureLoop, this);
+            break;
         }
-        else qDebug() << "Not removed";
-
-
-        FreeResources();
-        open_new_session();
-
-        break;
-    }
-    case QMessageBox::Discard:
-    {
-        if (fileDumper)
-                pcap_dump_close(fileDumper);
-
-        if (RemoveTempFile())
+        default:
         {
-                qDebug() << "Temporary file " << absolute_path << "was removed ...";
-                emit fileRemoved();
+            MSG_BOX_ERROR_SHOW("Error retrieving device type", "Device LINK layer is not supported")
+            return;
         }
-        else qDebug() << "Not removed";
-
-        FreeResources();
-
-        open_new_session();
-        break;
     }
-    case QMessageBox::Cancel:
+
+    if (capture_thread)
     {
-        break;
-    }
+        save_to_file = false;
+        emit StatusChanged(CaptureStatus::Started);
+        capture_thread->start();
     }
 }
 
-void SessionManager::open_file_for_read(const char *filename)
+pcap_t *SessionManager::GetRawCaptureHandle()
 {
-    if (capturing_handle) pcap_close(capturing_handle);
+    return capture_handle;
+}
 
-    capturing_handle = pcap_open_offline(filename, errorbuf);
+void SessionManager::SetInterface(const InterfaceItem * interface)
+{
+    current_interface = interface;
+}
 
-    if (!capturing_handle)
+void SessionManager::liveCapture()
+{
+
+}
+
+void SessionManager::openForRead(const char *filename)
+{
+    if (capture_handle) pcap_close(capture_handle);
+
+    capture_handle = pcap_open_offline(filename, pcap_error_buf);
+
+    if (!capture_handle)
     {
-        qDebug() << errorbuf;
+#ifdef QT_DEBUG
+        qDebug() << "Error opening dump for read: " << pcap_error_buf;
+#else
+        MSG_BOX_ERROR_SHOW("Error opening dump for read", pcap_error_buf)
+#endif
     }
     else
     {
         FreeResources();
-        saveFile = true;
-        auto type = pcap_datalink(capturing_handle);
+        save_to_file = true;
+        auto type = pcap_datalink(capture_handle);
         bool isReady = false;
         switch (type)
         {
@@ -480,22 +464,21 @@ void SessionManager::open_file_for_read(const char *filename)
         if (isReady)
         {
 
-            readThread = QThread::create(&SessionManager::ReadAllPacketsToModel, this);
-                connect(readThread, &QThread::started, this, [=] () {
-                emit modelPopulateStarted();
+            read_thread = QThread::create(&SessionManager::readAllPacketsToModel, this);
+                connect(read_thread, &QThread::started, this, [=] () {
+                emit ModelPopulateStarted();
             });
-            connect(readThread, &QThread::finished, this, [=] () {
-                    emit modelPopulateFinished();
-
+            connect(read_thread, &QThread::finished, this, [=] () {
+                    emit ModelPopulateFinished();
                 });
 
-            emit got_filename(QString(filename));
-            readThread->start();
+            emit FileNameFetched(QString(filename));
+            read_thread->start();
         }
     }
 }
 
-void SessionManager::ReadAllPacketsToModel()
+void SessionManager::readAllPacketsToModel()
 {
     int res;
     pcap_pkthdr *hdr;
@@ -504,34 +487,35 @@ void SessionManager::ReadAllPacketsToModel()
     static int f_num;
     f_num = 1;
 
-    qDebug() << "Filling model ...";
+#ifdef QT_DEBUG
+    qDebug() << "reading packets to data model started ...";
+#else
+#endif
 
-    while ((res = pcap_next_ex(capturing_handle, &hdr, &data)) >= 0)
+    while ((res = pcap_next_ex(capture_handle, &hdr, &data)) >= 0)
     {
-        FrameInfo frame{};
+        // FrameInfo frame{};
 
-        const char *m_ptr = (const char*)data;
-        frame.alt_time = hdr->ts.tv_usec;
+        // const char *m_ptr = (const char*)data;
+        // frame.alt_time = hdr->ts.tv_usec;
 
-        frame.copy = QByteArray(m_ptr, hdr->caplen);
-        frame.total_length = hdr->len;
+        // frame.copy = QByteArray(m_ptr, hdr->caplen);
+        // frame.total_length = hdr->len;
 
-        frame.cap_len = hdr->caplen;
-        frame.f_num = f_num;
+        // frame.cap_len = hdr->caplen;
+        // frame.f_num = f_num;
 
-        frame.recv_time = hdr->ts.tv_sec;
-        frame.p_ref = new Packet{};
+        // frame.recv_time = hdr->ts.tv_sec;
+        // frame.p_ref = new Packet{};
 
-        ParseFrame(&frame, data);
-        framesModel->append(frame);
-        f_num++;
+        // parseFrame(&frame, data);
+        // packets->append(frame);
+        // f_num++;
     }
 
-    qDebug() << "Model filled ...";
-}
+#ifdef QT_DEBUG
+    qDebug() << "reading packets to data model finished ...";
+#else
+#endif
 
-void SessionManager::setModel()
-{
-    //mainWindowRef->GetUI()->PacketView->setModel(framesModel);
 }
-

@@ -156,138 +156,32 @@ void SortingProxyModel::make_connects()
 
     connect(src, &PacketTableModel::countChanged, this, [=] (const size_t size, const size_t capacity)
             {
-        if (size == capacity) setLock(true);
-        else setLock(false);
+
     });
 
 }
 
 
-bool SortingProxyModel::filterAcceptsRow(int source_row, const QModelIndex &source_parent) const
+bool SortingProxyModel::filterAcceptsRow(int row, const QModelIndex &source_parent) const
 {
-    PacketTableModel * src = qobject_cast<PacketTableModel*>(sourceModel());
-    const FrameInfo & fr = src->get(source_row);
+    // PacketTableModel * src = qobject_cast<PacketTableModel*>(sourceModel());
+    // const FrameInfo & fr = src->get(source_row);
 
-    ProtocolHolder * node = fr.p_ref->First();
+    // ProtocolHolder * node = fr.p_ref->First();
 
-    mapFromSource(source_parent);
+    // mapFromSource(source_parent);
 
-    if (enabled && !filterExpr.isEmpty())
-    {
-        QRegularExpression udp_matcher{QString("[uU][dD][pP]"), QRegularExpression::CaseInsensitiveOption};
-        QRegularExpression tcp_matcher{QString("[tT][cC][pP]"), QRegularExpression::CaseInsensitiveOption};
-        QRegularExpression dns_matcher{QString("[dD][nN][sS]"), QRegularExpression::CaseInsensitiveOption};
-        QRegularExpression ip4_matcher{QString("[iI][pP](v)?(ersion)?4$"), QRegularExpression::CaseInsensitiveOption};
-        QRegularExpression ip6_matcher{QString("[iI][pP](v)?(ersion)?6$"), QRegularExpression::CaseInsensitiveOption};
-        QRegularExpression arp_matcher{QString("[aA][rR][pP]"), QRegularExpression::CaseInsensitiveOption};
-        QRegularExpression icmp_matcher{QString("[iI][cC][mM][pP]"), QRegularExpression::CaseInsensitiveOption};
-        QRegularExpression http_matcher{QString("[hH][tT][tT][pP]"), QRegularExpression::CaseInsensitiveOption};
-        if (udp_matcher.match(filterExpr).hasMatch())
-        {
-            while (node)
-            {
-                if (node->type == CurrentUDP)
-                {
-                    filteredCount++;
-                    return true;
-                }
-                node = node->next;
-            }
-            return false;
-        }
-
-        else if (tcp_matcher.match(filterExpr).hasMatch())
-        {
-            while (node)
-            {
-                if (node->type == CurrentTCP)
-                {
-                    filteredCount++;
-                    return true;
-                }
-                node = node->next;
-            }
-            return false;
-        }
-
-        else if (dns_matcher.match(filterExpr).hasMatch())
-        {
-            while (node)
-            {
-                if (node->type == CurrentDNS)
-                {
-                    filteredCount++;
-                    return true;
-                }
-                node = node->next;
-            }
-            return false;
-        }
-
-        else if (ip4_matcher.match(filterExpr).hasMatch())
-        {
-            while (node)
-            {
-                if (node->type == CurrentIPv4)
-                {
-                    filteredCount++;
-                    return true;
-                }
-                node = node->next;
-            }
-            return false;
-        }
-
-        else if (ip6_matcher.match(filterExpr).hasMatch())
-        {
-            while (node)
-            {
-                if (node->type == CurrentIPv6)
-                {
-                    filteredCount++;
-                    return true;
-                }
-                node = node->next;
-            }
-            return false;
-        }
-
-        else if (arp_matcher.match(filterExpr).hasMatch())
-        {
-            while (node)
-            {
-                if (node->type == CurrentARP)
-                {
-                    filteredCount++;
-                    return true;
-                }
-                node = node->next;
-            }
-            return false;
-        }
-
-        else if (icmp_matcher.match(filterExpr).hasMatch())
-        {
-            while (node)
-            {
-                if (node->type == CurrentICMP)
-                {
-                    filteredCount++;
-                    return true;
-                }
-                node = node->next;
-            }
-            return false;
-        }
-        else if (http_matcher.match(filterExpr).hasMatch())
-        {
-            return false;
-        }
-
-        return false;
-    }
-
-
+    // if (enabled && !filterExpr.isEmpty())
+    // {
+    //     QRegularExpression udp_matcher{QString("[uU][dD][pP]"), QRegularExpression::CaseInsensitiveOption};
+    //     QRegularExpression tcp_matcher{QString("[tT][cC][pP]"), QRegularExpression::CaseInsensitiveOption};
+    //     QRegularExpression dns_matcher{QString("[dD][nN][sS]"), QRegularExpression::CaseInsensitiveOption};
+    //     QRegularExpression ip4_matcher{QString("[iI][pP](v)?(ersion)?4$"), QRegularExpression::CaseInsensitiveOption};
+    //     QRegularExpression ip6_matcher{QString("[iI][pP](v)?(ersion)?6$"), QRegularExpression::CaseInsensitiveOption};
+    //     QRegularExpression arp_matcher{QString("[aA][rR][pP]"), QRegularExpression::CaseInsensitiveOption};
+    //     QRegularExpression icmp_matcher{QString("[iI][cC][mM][pP]"), QRegularExpression::CaseInsensitiveOption};
+    //     QRegularExpression http_matcher{QString("[hH][tT][tT][pP]"), QRegularExpression::CaseInsensitiveOption};
+    // }
     filteredCount = sourceModel()->rowCount();
     return true;
 }

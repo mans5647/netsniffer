@@ -93,4 +93,6 @@ size_t DnsRecordsSection::single_record_height() const
         return 0;
     }
     }
+
+    return std::numeric_limits<size_t>::max();
 }

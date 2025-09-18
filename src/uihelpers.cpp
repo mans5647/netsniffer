@@ -42,7 +42,7 @@ const QString & getLastProtocol(const ProtocolHolder * last)
 {
     static QString out;
     out.clear();
-    switch (last->type)
+    switch (last->GetType())
     {
     case CurrentIPv4:
     {
@@ -95,232 +95,232 @@ const QString & getLastProtocol(const ProtocolHolder * last)
 
 
 
-const QString & getPacketInfo(ProtocolHolder * last)
-{
-    static QString message;
-    message.clear();
+// const QString & getPacketInfo(ProtocolHolder * last)
+// {
+//     static QString message;
+//     message.clear();
 
-    switch (last->type)
-    {
-    case CurrentTCP:
-    {
-        TCPHolder * ref = &last->tcp_header;
-        QString flags_set;
-
-
-        uint8_t flags = ref->ExtractFlags();
-
-        flags_set += "[";
-        if (flags & TH_SYN) flags_set += " SYN ";
-        if (flags & TH_ACK) flags_set += " ACK ";
-        if (flags & TH_FIN) flags_set += " FIN ";
-        if (flags & TH_PUSH) flags_set += " PUSH ";
-        if (flags & TH_RST) flags_set += " RST ";
-        if (flags & TH_URG) flags_set += " URG ";
-        flags_set += "]";
-
-        const char * status = ((flags & TH_SYN) && !(flags & TH_ACK)) ? "New connetion" :
-                                 (flags & TH_FIN) ? "Finished" : (flags & TH_RST) ? "Reset" : "Data exchange";
-        auto sport = ref->ExtractSPort();
-        auto dport = ref->ExtractDPort();
-        auto plen  = ref->GetPayloadLength();
-        QTextStream formatted(&message);
-        formatted << sport << " -> " << dport << ", flags: " << flags_set << " status: " << status;
-        break;
-    }
-    case CurrentUDP:
-    {
-
-        UDPHolder * ref = &last->udp_header;
-
-        auto sport = ref->ExtractSPort();
-        auto dport = ref->ExtractDPort();
-        auto plen  = ref->GetPayloadLength();
-
-        message = QString::asprintf("%d -> %d, len: %d bytes", sport, dport, plen);
-        break;
-    }
-    case CurrentDNS:
-    {
-        DNSHolder * ref = &last->dns_header;
-
-        const char * opcode_message = "UNKNOWN";
-
-        auto id = ref->GetID();
-        auto flags = ref->GetFLAGS();
-        auto qcount = ref->GetNQ();
-        auto acount = ref->GetNA();
-        auto aa_cnt = ref->GetNAUTH();
-        auto ad_cnt = ref->GetNADD();
-        auto opcode = flags & DNS_FLAGS_OPCODE_MASK;
-
-        if (opcode == DNS_FLAGS_QUERY_STANDARD)
-            opcode_message = "STANDARD";
-        else if (opcode == DNS_FLAGS_QUERY_INVERSE)
-            opcode_message = "INVERSE";
-        else if (opcode == DNS_FLAGS_QUERY_STATUS)
-            opcode_message = "STATUS";
-
-        auto msg_type = flags & DNS_FLAGS_QR_MASK;
-
-        QTextStream fmt{&message};
+//     switch (last->GetType)
+//     {
+//     case CurrentTCP:
+//     {
+//         TCPHolder * ref = &last->tcp_header;
+//         QString flags_set;
 
 
-        auto rcode = flags & DNS_FLAGS_RCODE_MASK;
+//         uint8_t flags = ref->ExtractFlags();
 
-        QString rcodeMessage;
+//         flags_set += "[";
+//         if (flags & TH_SYN) flags_set += " SYN ";
+//         if (flags & TH_ACK) flags_set += " ACK ";
+//         if (flags & TH_FIN) flags_set += " FIN ";
+//         if (flags & TH_PUSH) flags_set += " PUSH ";
+//         if (flags & TH_RST) flags_set += " RST ";
+//         if (flags & TH_URG) flags_set += " URG ";
+//         flags_set += "]";
 
-        switch (rcode)
-        {
-        case DNS_RCODE_NOERROR: rcodeMessage = "OK"; break;
-        case DNS_RCODE_NXDOMAIN: rcodeMessage = "No such name"; break;
-        case DNS_RCODE_FORMERR: rcodeMessage = "Format error"; break;
-        case DNS_RCODE_REFUSED: rcodeMessage = "Query Refused"; break;
-        case DNS_RCODE_SFAIL: rcodeMessage = "Server failure"; break;
-        case DNS_RCODE_NIMPL: rcodeMessage = "Not implemented"; break;
-        default: rcodeMessage = "Unknown message type"; break;
-        }
+//         const char * status = ((flags & TH_SYN) && !(flags & TH_ACK)) ? "New connetion" :
+//                                  (flags & TH_FIN) ? "Finished" : (flags & TH_RST) ? "Reset" : "Data exchange";
+//         auto sport = ref->ExtractSPort();
+//         auto dport = ref->ExtractDPort();
+//         auto plen  = ref->GetPayloadLength();
+//         QTextStream formatted(&message);
+//         formatted << sport << " -> " << dport << ", flags: " << flags_set << " status: " << status;
+//         break;
+//     }
+//     case CurrentUDP:
+//     {
 
-        if (msg_type == DNS_FLAGS_QR_REPLY)
-        {
+//         UDPHolder * ref = &last->udp_header;
 
-            fmt << "DNS reply for domain ( ";
-            if (qcount)
-            {
+//         auto sport = ref->ExtractSPort();
+//         auto dport = ref->ExtractDPort();
+//         auto plen  = ref->GetPayloadLength();
 
-                const DnsQuestion * ptr = ref->GetQuestions();
+//         message = QString::asprintf("%d -> %d, len: %ld bytes", sport, dport, plen);
+//         break;
+//     }
+//     case CurrentDNS:
+//     {
+//         DNSHolder * ref = &last->dns_header;
 
-                for (auto i = 0; i < qcount; i++)
-                {
-                    fmt << (*ptr).name;
-                    ptr++;
-                }
+//         const char * opcode_message = "UNKNOWN";
 
-                fmt << " )";
-            }
+//         auto id = ref->GetID();
+//         auto flags = ref->GetFLAGS();
+//         auto qcount = ref->GetNQ();
+//         auto acount = ref->GetNA();
+//         auto aa_cnt = ref->GetNAUTH();
+//         auto ad_cnt = ref->GetNADD();
+//         auto opcode = flags & DNS_FLAGS_OPCODE_MASK;
+
+//         if (opcode == DNS_FLAGS_QUERY_STANDARD)
+//             opcode_message = "STANDARD";
+//         else if (opcode == DNS_FLAGS_QUERY_INVERSE)
+//             opcode_message = "INVERSE";
+//         else if (opcode == DNS_FLAGS_QUERY_STATUS)
+//             opcode_message = "STATUS";
+
+//         auto msg_type = flags & DNS_FLAGS_QR_MASK;
+
+//         QTextStream fmt{&message};
 
 
-            fmt << " [" << rcodeMessage << "] ";
+//         auto rcode = flags & DNS_FLAGS_RCODE_MASK;
 
-            fmt << " with id=0x" << QString("%1 ").arg(id, 0, 16, QChar('\0'));
-            if (acount)
-            {
-                fmt << " has following answers: ";
+//         QString rcodeMessage;
 
-                const DnsAnswer * ptr = ref->GetAnswers();
+//         switch (rcode)
+//         {
+//         case DNS_RCODE_NOERROR: rcodeMessage = "OK"; break;
+//         case DNS_RCODE_NXDOMAIN: rcodeMessage = "No such name"; break;
+//         case DNS_RCODE_FORMERR: rcodeMessage = "Format error"; break;
+//         case DNS_RCODE_REFUSED: rcodeMessage = "Query Refused"; break;
+//         case DNS_RCODE_SFAIL: rcodeMessage = "Server failure"; break;
+//         case DNS_RCODE_NIMPL: rcodeMessage = "Not implemented"; break;
+//         default: rcodeMessage = "Unknown message type"; break;
+//         }
 
-                for (auto i = 0; i < acount; i++)
-                {
-                    const DnsAnswer & ref = (*ptr);
-                    QString answer_fmt;
-                    if (ref.type == DNS_TYPE_A)
-                    {
-                        char addrBuf[ADDR_V4_BUFLEN_MIN];
+//         if (msg_type == DNS_FLAGS_QR_REPLY)
+//         {
 
-                        FromIPv4Address(&addrBuf[0], ADDR_V4_BUFLEN_MIN, &ref.adata.host_addr.address);
-                        answer_fmt = QString("A (%1) ").arg(addrBuf);
-                    }
+//             fmt << "DNS reply for domain ( ";
+//             if (qcount)
+//             {
 
-                    else if (ref.type == DNS_TYPE_CNAME)
-                    {
-                        answer_fmt = QString("CNAME (%1) ").arg(reinterpret_cast<const char*>(ref.adata.cname.data));
-                    }
+//                 const DnsQuestion * ptr = ref->GetQuestions();
 
-                    fmt << answer_fmt;
+//                 for (auto i = 0; i < qcount; i++)
+//                 {
+//                     fmt << (*ptr).name;
+//                     ptr++;
+//                 }
 
-                    ptr++;
-                }
-            }
+//                 fmt << " )";
+//             }
 
-        }
-        else
-        {
-            fmt << "DNS request for domain ( ";
-            if (qcount)
-            {
-                const DnsQuestion * ptr = ref->GetQuestions();
-                for (auto i = 0; i < qcount; i++)
-                {
-                    fmt << (*ptr).name;
-                    ptr++;
-                }
 
-                fmt << " )";
-            }
+//             fmt << " [" << rcodeMessage << "] ";
 
-            fmt << " with id=0x" << QString("%1 ").arg(id, 0, 16, QChar('\0'));
-        }
-        break;
+//             fmt << " with id=0x" << QString("%1 ").arg(id, 0, 16, QChar('\0'));
+//             if (acount)
+//             {
+//                 fmt << " has following answers: ";
 
-    }
+//                 const DnsAnswer * ptr = ref->GetAnswers();
 
-    case CurrentARP:
-    {
-        ARPHolder * ref = &last->arp_header;
-        auto type = ref->ExtractOperation();
+//                 for (auto i = 0; i < acount; i++)
+//                 {
+//                     const DnsAnswer & ref = (*ptr);
+//                     QString answer_fmt;
+//                     if (ref.type == DNS_TYPE_A)
+//                     {
+//                         char addrBuf[ADDR_V4_BUFLEN_MIN];
 
-        QString __str;
-        QTextStream fmt(&__str);
-        if (type == 1)
-        {
-            const uint8_t * data = ref->DestIP();
-            const uint8_t * data_2 = ref->SourceIP();
-            fmt << "ARP request for address "<< (int)data[0] << '.' << (int)data[1] << '.' << (int)data[2] << '.' << (int)data[3]
-                << " , tell MAC to " << (int)data_2[0] << '.' << (int)data_2[1] << '.' << (int)data_2[2] << '.' << (int)data_2[3] ;
-        }
-        else
-        {
-            const uint8_t * ip_ = ref->SourceIP();
-            const char * mac = ref->ExtractSrcMac();
-            fmt << "ARP response, " << (int)ip_[0] << '.' << (int)ip_[1] << '.' << (int)ip_[2] << '.' << (int)ip_[3]
-                << " is " << mac;
-        }
+//                         FromIPv4Address(&addrBuf[0], ADDR_V4_BUFLEN_MIN, &ref.adata.host_addr.address);
+//                         answer_fmt = QString("A (%1) ").arg(addrBuf);
+//                     }
 
-        message = __str;
+//                     else if (ref.type == DNS_TYPE_CNAME)
+//                     {
+//                         answer_fmt = QString("CNAME (%1) ").arg(reinterpret_cast<const char*>(ref.adata.cname.data));
+//                     }
 
-        break;
-    }
+//                     fmt << answer_fmt;
 
-    case CurrentICMP:
-    {
-        ICMPHolder * ref = &last->icmp_header;
-        auto icmp_msg_type = ref->getMessageType();
-        auto icmp_code = ref->getCode();
-        auto data_len = ref->getDataLength();
-        QString __str;
-        QTextStream fmt(&__str);
-        switch (icmp_msg_type)
-        {
+//                     ptr++;
+//                 }
+//             }
 
-        case ICMPHolder::ICMPMessageType::Echo:
-        {
-            fmt << "Echo (request) ";
-            fmt << "id=0x" << QString("%1").arg(ref->getID());
-            fmt << " seq=" << (QString("%1").arg(ref->getSequenceNum()));
-            break;
-        }
-        case ICMPHolder::ICMPMessageType::EchoReply:
-        {
-            fmt << "Echo (reply) ";
-            fmt << "id=0x" << QString("%1").arg(ref->getID());
-            fmt << " seq=" << QString("%1").arg(ref->getSequenceNum());
-            break;
-            break;
-        }
+//         }
+//         else
+//         {
+//             fmt << "DNS request for domain ( ";
+//             if (qcount)
+//             {
+//                 const DnsQuestion * ptr = ref->GetQuestions();
+//                 for (auto i = 0; i < qcount; i++)
+//                 {
+//                     fmt << (*ptr).name;
+//                     ptr++;
+//                 }
 
-        }
+//                 fmt << " )";
+//             }
 
-        fmt << " data length: " << QString("%1 bytes").arg(data_len);
-        message = __str;
-        break;
-    }
+//             fmt << " with id=0x" << QString("%1 ").arg(id, 0, 16, QChar('\0'));
+//         }
+//         break;
 
-    default:
-        break;
-    }
+//     }
 
-    return message;
-}
+//     case CurrentARP:
+//     {
+//         ARPHolder * ref = &last->arp_header;
+//         auto type = ref->ExtractOperation();
+
+//         QString __str;
+//         QTextStream fmt(&__str);
+//         if (type == 1)
+//         {
+//             const uint8_t * data = ref->DestIP();
+//             const uint8_t * data_2 = ref->SourceIP();
+//             fmt << "ARP request for address "<< (int)data[0] << '.' << (int)data[1] << '.' << (int)data[2] << '.' << (int)data[3]
+//                 << " , tell MAC to " << (int)data_2[0] << '.' << (int)data_2[1] << '.' << (int)data_2[2] << '.' << (int)data_2[3] ;
+//         }
+//         else
+//         {
+//             const uint8_t * ip_ = ref->SourceIP();
+//             const char * mac = ref->ExtractSrcMac();
+//             fmt << "ARP response, " << (int)ip_[0] << '.' << (int)ip_[1] << '.' << (int)ip_[2] << '.' << (int)ip_[3]
+//                 << " is " << mac;
+//         }
+
+//         message = __str;
+
+//         break;
+//     }
+
+//     case CurrentICMP:
+//     {
+//         ICMPHolder * ref = &last->icmp_header;
+//         auto icmp_msg_type = ref->getMessageType();
+//         auto icmp_code = ref->getCode();
+//         auto data_len = ref->getDataLength();
+//         QString __str;
+//         QTextStream fmt(&__str);
+//         switch (icmp_msg_type)
+//         {
+
+//         case ICMPHolder::ICMPMessageType::Echo:
+//         {
+//             fmt << "Echo (request) ";
+//             fmt << "id=0x" << QString("%1").arg(ref->getID());
+//             fmt << " seq=" << (QString("%1").arg(ref->getSequenceNum()));
+//             break;
+//         }
+//         case ICMPHolder::ICMPMessageType::EchoReply:
+//         {
+//             fmt << "Echo (reply) ";
+//             fmt << "id=0x" << QString("%1").arg(ref->getID());
+//             fmt << " seq=" << QString("%1").arg(ref->getSequenceNum());
+//             break;
+//             break;
+//         }
+
+//         }
+
+//         fmt << " data length: " << QString("%1 bytes").arg(data_len);
+//         message = __str;
+//         break;
+//     }
+
+//     default:
+//         break;
+//     }
+
+//     return message;
+// }
 
 QString getCurrentLocalTime()
 {
@@ -328,28 +328,28 @@ QString getCurrentLocalTime()
     return local.toString("MMMM d, yyyy hh:mm:ss:ms");
 }
 
-QString getFormattedProtocolNames(const FrameInfo * _value)
-{
-    const ProtocolHolder * __layer_node = _value->p_ref->First();
-    QString fmt;
-    while (__layer_node)
-    {
-        switch (__layer_node->type)
-        {
-        case CurrentIPv4:   fmt += "ip:";      break;
-        case CurrentIPv6:   fmt += "ipv6:";    break;
-        case CurrentARP:    fmt += "arp:";     break;
-        case CurrentTCP:    fmt += "tcp:";     break;
-        case CurrentUDP:    fmt += "udp:";        break;
-        case CurrentICMP:   fmt += "icmp:";    break;
-        case CurrentDNS:    fmt += "dns:"; break;
-        default: fmt += "."; break;
-        }
+// QString getFormattedProtocolNames(const FrameInfo * _value)
+// {
+//     const ProtocolHolder * __layer_node = _value->p_ref->First();
+//     QString fmt;
+//     while (__layer_node)
+//     {
+//         switch (__layer_node->type)
+//         {
+//         case CurrentIPv4:   fmt += "ip:";      break;
+//         case CurrentIPv6:   fmt += "ipv6:";    break;
+//         case CurrentARP:    fmt += "arp:";     break;
+//         case CurrentTCP:    fmt += "tcp:";     break;
+//         case CurrentUDP:    fmt += "udp:";        break;
+//         case CurrentICMP:   fmt += "icmp:";    break;
+//         case CurrentDNS:    fmt += "dns:"; break;
+//         default: fmt += "."; break;
+//         }
 
-        __layer_node = __layer_node->next;
-    }
-    return fmt;
-}
+//         __layer_node = __layer_node->next;
+//     }
+//     return fmt;
+// }
 
 const QString getNameOfKey(Locale locale, const ValueOfLocale & value)
 {

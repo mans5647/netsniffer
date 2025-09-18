@@ -4,7 +4,6 @@
 
 InterfaceView::InterfaceView(QWidget *parent)
 {
-    QTableView::QTableView(parent);
     setSelectionBehavior(QAbstractItemView::SelectRows);
     setSelectionMode(QAbstractItemView::SingleSelection);
     setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -23,7 +22,7 @@ InterfaceView::InterfaceView(QWidget *parent)
 
     verticalHeader()->setFont(recordsFont);
     verticalHeader()->setSectionResizeMode(QHeaderView::Fixed);
-    verticalHeader()->setDefaultSectionSize(10);
+    //verticalHeader()->setDefaultSectionSize(60);
 
     connect(this, &InterfaceView::doubleClicked, this, &InterfaceView::setDevice);
     connect(this, &InterfaceView::clicked, this, &InterfaceView::onDeviceSelected);

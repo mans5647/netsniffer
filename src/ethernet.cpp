@@ -1,53 +1,94 @@
 #include "ethernet.h"
+#include <cstdio>
+#include <QDebug>
+#if _WIN32
+    #include <WinSock2.h>
+    #include <WS2tcpip.h>
+#elif __linux__
+    #include <arpa/inet.h>
+#endif
 
-
-Ethernet::Ethernet()
+Ethernet::Ethernet(const ether_header * hdr)
 {
-    std::fill(MacDestination.begin(), MacDestination.end(), '\0');
-    std::fill(MacSource.begin(), MacSource.end(), '\0');
-    EtherType = -1;
-}
+    ether_type = ntohs(hdr->h_proto);
 
-Ethernet &Ethernet::operator =(const Ethernet &other)
-{
-    MacDestination = other.MacDestination;
-    MacSource = other.MacSource;
-    EtherType = other.EtherType;
-    ethernet_length = other.ethernet_length;
-    return *this;
+    // now, we need to transform both MAC-addresses to pretty hexadecimal strings
+    source.resize(MAC_PRETTY_NAME_SIZE + 1);
+    destination.resize(MAC_PRETTY_NAME_SIZE + 1);
+
+    std::snprintf(source.data(), MAC_PRETTY_NAME_SIZE, MAC_FMT,
+        hdr->mac_src[0],
+        hdr->mac_src[1],
+        hdr->mac_src[2],
+        hdr->mac_src[3],
+        hdr->mac_src[4],
+        hdr->mac_src[5]);
+
+    std::snprintf(destination.data(), MAC_PRETTY_NAME_SIZE, MAC_FMT,
+        hdr->mac_dest[0],
+        hdr->mac_dest[1],
+        hdr->mac_dest[2],
+        hdr->mac_dest[3],
+        hdr->mac_dest[4],
+        hdr->mac_dest[5]);
 }
 
 Ethernet::Ethernet(Ethernet &&other)
 {
-    MacDestination.swap(other.MacDestination);
-    MacSource.swap(other.MacSource);
+    this->destination = std::move(other.destination);
+    this->source = std::move(other.source);
+    this->ether_type = other.ether_type;
 
-    EtherType = other.EtherType;
+
 }
 
-Ethernet::Ethernet(ether_header *rawFrame)
+Ethernet& Ethernet::operator=(Ethernet && other)
 {
-    const uint8_t * ptr_dst = rawFrame->mac_dst;
-    const uint8_t * ptr_src = rawFrame->mac_src;
+    this->destination = std::move(other.destination);
+    this->source = std::move(other.source);
+    this->ether_type = other.ether_type;
+    return *this;
+}
+Ethernet::Ethernet()
+{
+    this->destination = "";
+    this->source = "";
+    this->ether_type = -1;
+}
 
-    for (auto i = 0; i < N_OCTETS; i++)
+std::string_view Ethernet::MacSource() const
+{
+    return source;
+}
+
+std::string_view Ethernet::MacDestination() const
+{
+    return destination;
+}
+
+bool Ethernet::hasNextProtocol()
+{
+
+    switch (EtherType())
     {
-        MacDestination.at(i) = (*ptr_dst);
-        MacSource.at(i) = (*ptr_src);
-        ptr_dst++;
-        ptr_src++;
+        case H_PROTO_ARP:
+        case H_PROTO_IP4:
+        case H_PROTO_IP6:
+            return true;
     }
 
-    EtherType = ntohs(rawFrame->h_proto);
-
-
-
-    ethernet_length = EtherType;
+    return false;
 }
 
-bool Ethernet::hasNextProtocol(const Ethernet &value)
+bool Ethernet::hasNextProtocol() const
 {
-    const uint16_t proto = value.getEtherType();
-    return (proto == H_PROTO_ARP || proto == H_PROTO_IP4 || proto == H_PROTO_IP6) ? true : false;
+    switch (EtherType())
+    {
+        case H_PROTO_ARP:
+        case H_PROTO_IP4:
+        case H_PROTO_IP6:
+            return true;
+    }
 
+    return false;
 }

@@ -25,26 +25,26 @@
      <item>
       <widget class="QLabel" name="label">
        <property name="text">
-        <string>Choose the interface</string>
+        <string>Выберите интерфейс</string>
        </property>
        <property name="alignment">
-        <set>Qt::AlignCenter</set>
+        <set>Qt::AlignmentFlag::AlignCenter</set>
        </property>
       </widget>
      </item>
      <item>
       <widget class="QTableWidget" name="interface_list">
        <property name="selectionMode">
-        <enum>QAbstractItemView::SingleSelection</enum>
+        <enum>QAbstractItemView::SelectionMode::SingleSelection</enum>
        </property>
        <property name="selectionBehavior">
-        <enum>QAbstractItemView::SelectRows</enum>
+        <enum>QAbstractItemView::SelectionBehavior::SelectRows</enum>
        </property>
        <property name="showGrid">
         <bool>false</bool>
        </property>
        <property name="gridStyle">
-        <enum>Qt::NoPen</enum>
+        <enum>Qt::PenStyle::NoPen</enum>
        </property>
        <attribute name="horizontalHeaderMinimumSectionSize">
         <number>30</number>
@@ -55,8 +55,11 @@
        <attribute name="horizontalHeaderHighlightSections">
         <bool>false</bool>
        </attribute>
+       <attribute name="verticalHeaderMinimumSectionSize">
+        <number>200</number>
+       </attribute>
        <attribute name="verticalHeaderDefaultSectionSize">
-        <number>20</number>
+        <number>200</number>
        </attribute>
        <attribute name="verticalHeaderHighlightSections">
         <bool>false</bool>
@@ -76,30 +79,9 @@
          <string>Type</string>
         </property>
        </column>
-       <column>
-        <property name="text">
-         <string>Status</string>
-        </property>
-       </column>
-       <column>
-        <property name="text">
-         <string>Loopback</string>
-        </property>
-       </column>
+       <column/>
+       <column/>
       </widget>
-     </item>
-     <item>
-      <spacer name="verticalSpacer">
-       <property name="orientation">
-        <enum>Qt::Vertical</enum>
-       </property>
-       <property name="sizeHint" stdset="0">
-        <size>
-         <width>20</width>
-         <height>40</height>
-        </size>
-       </property>
-      </spacer>
      </item>
      <item>
       <widget class="QGroupBox" name="groupBox">
@@ -118,7 +100,7 @@
           <item>
            <spacer name="horizontalSpacer">
             <property name="orientation">
-             <enum>Qt::Horizontal</enum>
+             <enum>Qt::Orientation::Horizontal</enum>
             </property>
             <property name="sizeHint" stdset="0">
              <size>

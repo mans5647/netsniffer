@@ -95,7 +95,7 @@ void CaptureSettingsDialog::prepareFile()
     {
         auto str_time = QDateTime::currentDateTime().toString("dd-MM-yyyy");
         auto iface = device_table->getSelectedItem();
-        auto iface_name = iface ? iface->getFriendlyName() : QByteArray("Unkwown");
+        auto iface_name = iface ? iface->GetFriendlyName() : QByteArray("Unkwown");
         file_settings->SetDefaultName(str_time, iface_name);
     }
     else if (mode == Custom)
@@ -104,7 +104,7 @@ void CaptureSettingsDialog::prepareFile()
         {
             auto str_time = QDateTime::currentDateTime().toString("dd-MM-yyyy");
             auto iface = device_table->getSelectedItem();
-            auto iface_name = iface ? iface->getFriendlyName() : QByteArray("Unkwown");
+            auto iface_name = iface ? iface->GetFriendlyName() : QString("Unkwown");
             file_settings->SetDefaultName(str_time, iface_name);
         }
     }

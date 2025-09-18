@@ -3,6 +3,11 @@
 #include "proto.h"
 #include <QRegularExpression>
 
+#if defined(__linux__)
+    #include <sys/types.h>
+    #include <ifaddrs.h>
+#endif
+
 #pragma comment(lib, "IPHLPAPI.lib")
 
 InterfaceModel::InterfaceModel()
@@ -40,9 +45,35 @@ void InterfaceModel::appendItem(InterfaceItem &&item)
     endInsertRows();
 }
 
-void InterfaceModel::RetrieveDevices()
+#ifdef __linux__
+void InterfaceModel::retrieveDevicesLinux()
 {
+    ResetModel();
+    // not impl!
+    pcap_if_t * dev = NULL;
+    int status = 0;
+    status = pcap_findalldevs(&alldevs, errbuf);
+    if (status == PCAP_ERROR)
+        emit errorHappened();
+    else
+    {
+        dev = alldevs;
 
+        while(dev)
+        {
+            std::size_t lastRowIndex = interfaces.size();
+            beginInsertRows(QModelIndex(), lastRowIndex, lastRowIndex);
+            interfaces.emplace_back(dev);
+            endInsertRows();
+            dev = dev->next;
+        }
+    }
+}
+#endif
+
+#ifdef _WIN32
+void InterfaceModel::retrieveDevicesWin32()
+{
     ResetModel();
     int status = pcap_findalldevs(&alldevs, errbuf);
 
@@ -106,6 +137,16 @@ void InterfaceModel::RetrieveDevices()
 
     }
 }
+#endif
+
+void InterfaceModel::RetrieveDevices()
+{
+#ifdef __linux__
+    retrieveDevicesLinux();
+#elif defined(_WIN32)
+    retrieveDevicesWin32();
+#endif
+}
 
 bool InterfaceModel::hasIndex(int row, int column, const QModelIndex &parent) const
 {
@@ -146,20 +187,19 @@ QVariant InterfaceModel::data(const QModelIndex &index, int role) const
         {
         case COLUMN_FRIENDLY_NAME:
         {
-            value.setValue(interfaces.at(row).getFriendlyName());
+            value.setValue(interfaces.at(row).GetFriendlyName());
             break;
         }
         case COLUMN_DESC:
         {
-            value.setValue(interfaces.at(row).getDescription());
+            value.setValue(interfaces.at(row).GetDescription());
             break;
         }
         case COLUMN_TYPE:
         {
-            DeviceType type = interfaces.at(row).getType();
+            DeviceType type = interfaces.at(row).GetType();
 
-            switch (type)
-            {
+            switch (type) {
             case DeviceType::Unknown:   value.setValue(tr("Неизвестное устройство"));  break;
             case DeviceType::Wireless:  value.setValue(tr("Беспроводное устройство")); break;
             case DeviceType::Ethernet:  value.setValue(tr("Ethernet")); break;
@@ -173,17 +213,20 @@ QVariant InterfaceModel::data(const QModelIndex &index, int role) const
         {
 
             const InterfaceItem & ref = interfaces.at(row);
-            auto flags = ref.getFlags();
-            if (ref.is_running() && !(flags & PCAP_IF_UP))
-                value.setValue(tr("Установлено, но не запущено"));
-            else value.setValue(tr("Установлено и запущено"));
+            std::uint32_t flags = ref.GetFlags();
+
+            if (ref.isRunning() && !(flags & PCAP_IF_UP))
+                value.setValue(tr("Установлено/не запущено"));
+            else
+                value.setValue(tr("Установлено/запущено"));
+
             break;
         }
         case COLUMN_CONN_STATUS:
         {
 
             const InterfaceItem & ref = interfaces.at(row);
-            auto flags = ref.getFlags();
+            auto flags = ref.GetFlags();
 
             if (flags & PCAP_IF_CONNECTION_STATUS_CONNECTED)
                 value.setValue(tr("Подключено"));
@@ -198,8 +241,8 @@ QVariant InterfaceModel::data(const QModelIndex &index, int role) const
         {
             QString fmt;
             const InterfaceItem & device = interfaces.at(row);
-            InterfaceItem::ConstIteratorType begin = interfaces.at(row).firstAddress();
-            InterfaceItem::ConstIteratorType end = interfaces.at(row).lastAddress();
+            InterfaceItem::ConstIteratorType begin = interfaces.at(row).FirstAddress();
+            InterfaceItem::ConstIteratorType end = interfaces.at(row).LastAddress();
 
             for (; begin != end; begin++)
             {
@@ -208,7 +251,7 @@ QVariant InterfaceModel::data(const QModelIndex &index, int role) const
                     const sockaddr * setAddr = begin->getAddr();
                     if (setAddr->sa_family == AF_INET)
                     {
-                        char buf[16];
+                        char buf[132];
                         const sockaddr_in * Addr4 = (const sockaddr_in*)setAddr;
                         inet_ntop(AF_INET, &Addr4->sin_addr, buf, 16);
 
@@ -226,7 +269,7 @@ QVariant InterfaceModel::data(const QModelIndex &index, int role) const
                 }
             }
 
-            if (device.getType() == DeviceType::Loopback)
+            if (device.GetType() == DeviceType::Loopback)
             {
                 fmt = "127.0.0.1";
             }

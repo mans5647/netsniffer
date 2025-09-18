@@ -3,25 +3,29 @@
 #include "ui_mainwindow.h"
 #include "sortingproxymodel.h"
 #include "metainfopanel.h"
-#include "myhexview.h"
+#include "capturesettingsdialog.h"
+#include "interfaceview.h"
+#include "filesettingsview.h"
+#include "interfaceitem.h"
+#include "ui/packetgeneralinfotab.h"
+#include "qhexview.h"
+#include "model/buffer/qmemorybuffer.h"
+
+
 #include <QPalette>
 #include <QSplitter>
 #include <QLineEdit>
 #include <QFile>
 #include <QFileInfo>
-#include "capturesettingsdialog.h"
-#include "interfaceview.h"
-#include "filesettingsview.h"
-#include "interfaceitem.h"
-#include "llhttp.h"
 
-const char * MainWindow::program_name = "NetSniffer - анализатор пакетов";
+const char * MainWindow::ProgramName = "NetSniffer - анализатор пакетов";
+
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
-    , ui(new Ui::MainWindow)
+    , ui_(new Ui::MainWindow)
 {
-    ui->setupUi(this);
+    ui_->setupUi(this);
 
     QIcon icons[] = { QIcon("../icons/wifi.png"),
                      QIcon("../icons/stop.png"),
@@ -30,29 +34,27 @@ MainWindow::MainWindow(QWidget *parent)
                      QIcon("../icons/previous.png"),
                      QIcon("../icons/next.png") };
 
+    ui_->StartCapture->setIcon(icons[0].pixmap(QSize(25, 25)));
+    ui_->StopCapture->setIcon(icons[1].pixmap(QSize(25, 25)));
+    ui_->Settings->setIcon(icons[2].pixmap(QSize(25, 25)));
+    //ui_->Save_Dump->setIcon(icons[3].pixmap(QSize(25, 25)));
 
 
-    ui->StartCapture->setIcon(icons[0].pixmap(QSize(25, 25)));
-    ui->StopCapture->setIcon(icons[1].pixmap(QSize(25, 25)));
-    ui->Settings->setIcon(icons[2].pixmap(QSize(25, 25)));
-    //ui->Save_Dump->setIcon(icons[3].pixmap(QSize(25, 25)));
+    ui_->OpenPcap->setIcon(QApplication::style()->standardIcon(QStyle::SP_DirIcon));
+    ui_->PrevPacket->setIcon(icons[4].pixmap(QSize(100, 100)));
+    ui_->NextPacket->setIcon(icons[5].pixmap(QSize(100, 100)));
 
 
-    ui->OpenPcap->setIcon(QApplication::style()->standardIcon(QStyle::SP_DirIcon));
-    ui->PrevPacket->setIcon(icons[4].pixmap(QSize(100, 100)));
-    ui->NextPacket->setIcon(icons[5].pixmap(QSize(100, 100)));
-
-
-    setWindowTitle(program_name);
-    currentViewingFrame = nullptr;
-    currentFrame = nullptr;
-    currentInterface = nullptr;
-    selectedTab = 0;
-    tabsAllocated = 0;
+    setWindowTitle(ProgramName);
+    current_viewing_frame_ = nullptr;
+    current_frame_ = nullptr;
+    current_interface_ = nullptr;
+    selected_tab_ = 0;
+    tabs_alloc_total = 0;
     selectedPacket = -1;
-    is_options_widget_opened = false;
-    has_packets = false;
-    locked_for_view = false;
+    is_options_open_ = false;
+    has_packets_ = false;
+    locked_for_view_ = false;
 
     SetEnabledStopCapture(false);
     SetEnabledSaveCapture(false);
@@ -62,17 +64,17 @@ MainWindow::MainWindow(QWidget *parent)
 
     QPalette p;
     p.setColor(QPalette::Window, QColor(Qt::GlobalColor::gray));
-    ui->splitter->setPalette(p);
+    ui_->splitter->setPalette(p);
 
 
-    captureManager = SessionManager::getInstance();
+    capture_manager_ = SessionManager::getInstance();
 
 
-    QTableView * u_ref = ui->PacketView;
+    QTableView * u_ref = ui_->PacketView;
 
 
 
-    ui->PacketView->setSortingEnabled(true);
+    ui_->PacketView->setSortingEnabled(true);
 
     QHeaderView * horizontal = u_ref->horizontalHeader();
     horizontal->setMinimumSectionSize(100);
@@ -100,49 +102,53 @@ MainWindow::MainWindow(QWidget *parent)
     u_ref->setFrameShape(QFrame::NoFrame);
 
 
-    ui->ProtoDetailWidget->setMinimumSize(QSize(100, 100));
-    ui->ProtoDetailWidget->setMaximumSize(QSize(QWIDGETSIZE_MAX, QWIDGETSIZE_MAX));
-    ui->ProtoDetailWidget->clear();
+    ui_->ProtoDetailWidget->setMinimumSize(QSize(100, 100));
+    ui_->ProtoDetailWidget->setMaximumSize(QSize(QWIDGETSIZE_MAX, QWIDGETSIZE_MAX));
+    ui_->ProtoDetailWidget->clear();
 
 
 
-    tab_hex_layout = new QHBoxLayout(ui->BottomFrame);
+    tab_hex_layout = new QHBoxLayout(ui_->BottomFrame);
 
     delim = new QSplitter(Qt::Horizontal);
 
-    hex_view = new MyHexView(QByteArray());
-    CaptureSettings = new CaptureSettingsDialog();
+    // -- initialize hex view panel
+    hex_view = new QHexView();
+    hex_view->setDocument(QHexDocument::fromMemory<QMemoryBuffer>(current_hex_data_));
+    // -- end
 
-    delim->addWidget(ui->ProtoDetailWidget);
+
+    cap_settings = new CaptureSettingsDialog();
+
+    delim->addWidget(ui_->ProtoDetailWidget);
     delim->addWidget(hex_view);
 
     tab_hex_layout->addWidget(delim);
 
-    auto _font = QFont("Havletica", 10);
-    _font.setStyleHint(QFont::Monospace);
-    SetFont(_font);
 
-    ui->PacketView->verticalHeader()->setSectionResizeMode(QHeaderView::Fixed);
-    ui->PacketView->verticalHeader()->setDefaultSectionSize(24);
+    _SetFont(QFont("Havletica", 10));
 
-
-    sortingModel = new SortingProxyModel(this);
-    sortingModel->setDynamicSortFilter(false);
-    sortingModel->setSourceModel(captureManager->getModel());
-    sortingModel->make_connects();
-    ui->PacketView->setModel(sortingModel);
-    ui->PacketView->setSortingEnabled(true);
+    ui_->PacketView->verticalHeader()->setSectionResizeMode(QHeaderView::Fixed);
+    ui_->PacketView->verticalHeader()->setDefaultSectionSize(24);
 
 
-    metaPanel = new MetaInfoPanel();
-    QVBoxLayout * mainGrid = qobject_cast<QVBoxLayout*>(ui->MainGrid->layout());
-    mainGrid->addWidget(metaPanel);
-    frame_row_selected = ui->PacketView->selectionModel();
-    connect(frame_row_selected, &QItemSelectionModel::currentRowChanged, this, &MainWindow::ShowDetailed);
-    connect(ui->PacketView, SIGNAL(clicked(QModelIndex)), this, SLOT(ShowPacketDetailed(QModelIndex)));
-    connect(ui->ProtoDetailWidget, SIGNAL(currentChanged(int)), this, SLOT(SetTabIndex(int)));
-    connect(ui->filterExpr, &QLineEdit::returnPressed, this, &MainWindow::SetFilter);
-    connect(this, &MainWindow::FilterTriggered, sortingModel, &SortingProxyModel::apply_filter);
+    sorting_model_ = new SortingProxyModel(this);
+    sorting_model_->setDynamicSortFilter(false);
+    sorting_model_->setSourceModel(capture_manager_->GetPackets());
+    sorting_model_->make_connects();
+    ui_->PacketView->setModel(sorting_model_);
+    ui_->PacketView->setSortingEnabled(true);
+
+
+    meta_panel_ = new MetaInfoPanel();
+    QVBoxLayout * mainGrid = qobject_cast<QVBoxLayout*>(ui_->MainGrid->layout());
+    mainGrid->addWidget(meta_panel_);
+    frame_row_selected_ = ui_->PacketView->selectionModel();
+    connect(frame_row_selected_, &QItemSelectionModel::currentRowChanged, this, &MainWindow::ShowDetailed);
+    connect(ui_->PacketView, SIGNAL(clicked(QModelIndex)), this, SLOT(ShowPacketDetailed(QModelIndex)));
+    connect(ui_->ProtoDetailWidget, SIGNAL(currentChanged(int)), this, SLOT(SetTabIndex(int)));
+    connect(ui_->filterExpr, &QLineEdit::returnPressed, this, &MainWindow::SetFilterAuto);
+    connect(this, &MainWindow::FilterTriggered, sorting_model_, &SortingProxyModel::apply_filter);
 
     SetupInitialConnects();
 
@@ -150,85 +156,75 @@ MainWindow::MainWindow(QWidget *parent)
 
 void MainWindow::SetupInitialConnects()
 {
-    connect(ui->Settings, &QPushButton::clicked, this, &MainWindow::ShowInterfaceWindow);
-    connect(ui->StopCapture, &QPushButton::clicked, captureManager, &SessionManager::StopCapture);
-    connect(ui->PrevPacket, &QPushButton::clicked, this, [=] () {} );
-    connect(ui->NextPacket, &QPushButton::clicked, this, &MainWindow::ToNext);
+    connect(ui_->Settings, &QPushButton::clicked, this, &MainWindow::ShowInterfaceWindow);
+    connect(ui_->StopCapture, &QPushButton::clicked, capture_manager_, &SessionManager::StopCapture);
+    connect(ui_->PrevPacket, &QPushButton::clicked, this, [=] () {} );
+    connect(ui_->NextPacket, &QPushButton::clicked, this, &MainWindow::ToNext);
 
-    connect(ui->PacketView->model(), &QAbstractItemModel::rowsInserted, this,   [=] () { SetEnabledIterButtons(true); } );
-    connect(ui->PacketView->model(), &QAbstractItemModel::modelReset, this,     [=] () { SetEnabledIterButtons(false); } );
+    connect(ui_->PacketView->model(), &QAbstractItemModel::rowsInserted, this,   [=] () { SetEnabledIterButtons(true); } );
+    connect(ui_->PacketView->model(), &QAbstractItemModel::modelReset, this,     [=] () { SetEnabledIterButtons(false); } );
 
-    PacketTableModel * currModel = qobject_cast<PacketTableModel*>(sortingModel->sourceModel());
+    PacketTableModel * currModel = qobject_cast<PacketTableModel*>(sorting_model_->sourceModel());
     connect(currModel, &PacketTableModel::countChanged, this, &MainWindow::CheckCurrentModelDataValidity);
-    connect(captureManager, &SessionManager::countUpdated, this,
+    connect(capture_manager_, &SessionManager::CountUpdated, this,
             [this] ()
             {
-                calculateMetrics();
-
+                CalculateMetricsAuto();
             }
         );
-    connect(sortingModel, &SortingProxyModel::filterCountChanged, this, [this] (float count, float chunk)
+    connect(sorting_model_, &SortingProxyModel::filterCountChanged, this, [this] (float count, float chunk)
             {
-        metaPanel->setChunkCount((const size_t)chunk);
-        updatePercents(count, chunk);
+        meta_panel_->setChunkCount((const size_t)chunk);
+        UpdatePercent(count, chunk);
     });
 
 
-    connect(sortingModel, &SortingProxyModel::filteringBegan, this, &MainWindow::DetachModel);
-    connect(sortingModel, &SortingProxyModel::filteringEnded, this, &MainWindow::AttachModel);
+    connect(sorting_model_, &SortingProxyModel::filteringBegan, this, &MainWindow::DetachModel);
+    connect(sorting_model_, &SortingProxyModel::filteringEnded, this, &MainWindow::AttachModel);
 
 
-    connect(captureManager, &SessionManager::modelClearStarted, this, &MainWindow::ResetAll);
-    connect(captureManager, &SessionManager::modelClearFinished, this, &MainWindow::SetupAll);
+    connect(capture_manager_, &SessionManager::ModelClearStarted, this, &MainWindow::ResetAll);
+    connect(capture_manager_, &SessionManager::ModelClearFinished, this, &MainWindow::SetupAll);
 
-    connect(CaptureSettings->getTableView(), &InterfaceView::deviceSelected, this, &MainWindow::startup);
-    connect(captureManager, &SessionManager::statusChanged, this, &MainWindow::setProgramInformation);
+    connect(cap_settings->getTableView(), &InterfaceView::deviceSelected, this, &MainWindow::Startup);
+    connect(capture_manager_, &SessionManager::StatusChanged, this, &MainWindow::SetCaptureStatus);
 
-    connect(captureManager, &SessionManager::fileRemoved, this, &MainWindow::updateFileInfo);
-    connect(captureManager, &SessionManager::fileSaved, this, &MainWindow::updateFileInfo);
+    connect(capture_manager_, &SessionManager::FileRemoved, this, &MainWindow::UpdateFileInfo);
+    connect(capture_manager_, &SessionManager::FileSaved, this, &MainWindow::UpdateFileInfo);
 
-    connect(ui->OpenPcap, &QPushButton::clicked, this, &MainWindow::openForReadDump);
-    connect(captureManager, &SessionManager::modelPopulateStarted, this, &MainWindow::ResetAll);
-    connect(captureManager, &SessionManager::modelPopulateFinished, this, &MainWindow::SetupAll);
+    connect(ui_->OpenPcap, &QPushButton::clicked, this, &MainWindow::OpenForReadDump);
+    connect(capture_manager_, &SessionManager::ModelPopulateStarted, this, &MainWindow::ResetAll);
+    connect(capture_manager_, &SessionManager::ModelPopulateFinished, this, &MainWindow::SetupAll);
 
-    connect(captureManager, &SessionManager::got_filename, this, [=] (const QString & fname)
+    connect(capture_manager_, &SessionManager::FileNameFetched, this, [=] (const QString & fname)
     {
         QFile __dumpInfo{fname};
         QFileInfo fi{fname};
-        file_path = fname;
+        file_path_ = fname;
         setWindowTitle(fi.fileName());
-        metaPanel->addFileName(fi.fileName());
+        meta_panel_->addFileName(fi.fileName());
     });
 }
 
 
-void MainWindow::PrepareSession()
-{
-    //captureManager->DevicePrepare();
-}
+MainWindow::MainWindowPtrImpl MainWindow::GetUI() { return ui_; }
 
-Ui::MainWindow* MainWindow::GetUI() { return ui; }
 
-void MainWindow::HandlePacketOutput(const FrameInfo & frame)
+void MainWindow::SetOpenedState(bool opened)
 {
-//    tmodel->append(frame);
-}
-
-void MainWindow::setOpenedState(bool flag)
-{
-    is_options_widget_opened = flag;
+    is_options_open_ = opened;
 }
 
 
 void MainWindow::ShowInterfaceWindow()
 {
-    if (is_options_widget_opened) return;
-    CaptureSettings->show();
+    if (is_options_open_) return;
+    cap_settings->show();
 }
 
 void MainWindow::SetEnabledStopCapture(bool flag)
 {
-    ui->StopCapture->setEnabled(flag);
+    ui_->StopCapture->setEnabled(flag);
 }
 
 void MainWindow::SetEnabledSaveCapture(bool flag)
@@ -238,187 +234,185 @@ void MainWindow::SetEnabledSaveCapture(bool flag)
 
 void MainWindow::SetEnabledStartCapture(bool flag)
 {
-    ui->StartCapture->setEnabled(flag);
+    ui_->StartCapture->setEnabled(flag);
 }
 
 void MainWindow::SetEnabledCaptureOptions(bool flag)
 {
-    ui->Settings->setEnabled(flag);
+    ui_->Settings->setEnabled(flag);
 }
 
 void MainWindow::SetEnabledIterButtons(bool flag)
 {
-    ui->NextPacket->setEnabled(flag);
-    ui->PrevPacket->setEnabled(flag);
+    ui_->NextPacket->setEnabled(flag);
+    ui_->PrevPacket->setEnabled(flag);
 }
 
 void MainWindow::SetEnabledOpenPcapDump(bool flag)
 {
-    ui->OpenPcap->setEnabled(flag);
+    ui_->OpenPcap->setEnabled(flag);
 }
 
 void MainWindow::ShowPacketDetailed(const QModelIndex & index)
 {
 
-    QModelIndex mappedIndex = sortingModel->mapToSource(index);
+    QModelIndex mappedIndex = sorting_model_->mapToSource(index);
 
     if (!mappedIndex.isValid()) return;
 
     int row = mappedIndex.row();
-    PacketTableModel * packets = qobject_cast<PacketTableModel*>(captureManager->getModel());
+    PacketTableModel * packets = qobject_cast<PacketTableModel*>(capture_manager_->GetPackets());
 
 
-    if (is_locked())
-    {
-        if (tabsAllocated > 0)
-        {
-            FreeAllTabs();
-        }
-        hex_view->reset();
-    }
+    // if (IsLocked())
+    // {
+    //     if (tabsAllocated > 0)
+    //     {
+    //         _FreeAllTabs();
+    //     }
+    //     hex_view->hexDocument()->reset();
+    // }
 
-    else
-    {
+    // else
+    // {
 
-        auto List = packets->get_list_ptr();
+    //     auto List = packets->get_list_ptr();
 
-        auto begin = List->begin();
-        auto end = List->end();
+    //     auto begin = List->begin();
+    //     auto end = List->end();
 
-        if (begin == end) return;
+    //     if (begin == end) return;
 
-        const FrameInfo & value = packets->get(row);
+    //     const FrameInfo & value = packets->get(row);
 
-        delete currentFrame;
-        currentFrame = new FrameInfo(value);
+    //     delete current_frame_;
+    //     current_frame_ = new FrameInfo(value);
 
-        if (tabsAllocated > 0)
-        {
-            FreeAllTabs();
-        }
-
-
-        tabs = new GenericTab*[TAB_MAX];
-
-        tabs[GNINFO_INDEX] = new GenericTab(TabType::General, currentFrame, nullptr);
-        tabs[ETH_INDEX] = new GenericTab(TabType::Ethernet, currentFrame, nullptr);
-
-        tabs[GNINFO_INDEX]->getTab()->pinfo->commit();
-        tabs[ETH_INDEX]->getTab()->eth->commit();
+    //     if (tabs_alloc_total > 0)
+    //     {
+    //         _FreeAllTabs();
+    //     }
 
 
-        ui->ProtoDetailWidget->addTab(tabs[GNINFO_INDEX]->getMainWidget(),  GENERAL_TAB_NAME_RU);
-        ui->ProtoDetailWidget->addTab(tabs[ETH_INDEX]->getMainWidget(),     ETHERNET_TAB_RUS);
+    //     tabs = new GenericTab*[TAB_MAX];
 
-        tabsAllocated += 2;
+    //     tabs[GNINFO_INDEX] = new GenericTab(TabType::General, current_frame_, nullptr);
+    //     tabs[ETH_INDEX] = new GenericTab(TabType::Ethernet, current_frame_, nullptr);
 
-        auto __getProtocolName = [](TabType type) -> QString
-        {
-            switch (type)
-            {
-            case TabType::V4: return  tr(IPv4_TAB_RU);
-            case TabType::ARP: return tr("Протокол определения адреса (ARP)");
-            case TabType::TCP: return tr("Протокол управления передачей (TCP)");
-            case TabType::UDP: return tr("Протокол датаграмм клиента (UDP)");
-            case TabType::ICMP: return tr("Протокол управления интернет сообщениями (ICMP)");
-            case TabType::DNS: return tr("Система доменных имен (DNS)");
-            }
-            return tr("Unknown");
-        };
+    //     tabs[GNINFO_INDEX]->getTab()->pinfo->commit();
+    //     tabs[ETH_INDEX]->getTab()->eth->commit();
 
 
+    //     ui_->ProtoDetailWidget->addTab(tabs[GNINFO_INDEX]->getMainWidget(),  GENERAL_TAB_NAME_RU);
+    //     ui_->ProtoDetailWidget->addTab(tabs[ETH_INDEX]->getMainWidget(),     ETHERNET_TAB_RUS);
+
+    //     tabs_alloc_total += 2;
+
+    //     auto __getProtocolName = [](TabType type) -> QString
+    //     {
+    //         switch (type)
+    //         {
+    //         case TabType::V4: return  tr(IPv4_TAB_RU);
+    //         case TabType::ARP: return tr("Протокол определения адреса (ARP)");
+    //         case TabType::TCP: return tr("Протокол управления передачей (TCP)");
+    //         case TabType::UDP: return tr("Протокол датаграмм клиента (UDP)");
+    //         case TabType::ICMP: return tr("Протокол управления интернет сообщениями (ICMP)");
+    //         case TabType::DNS: return tr("Система доменных имен (DNS)");
+    //         }
+    //         return tr("Unknown");
+    //     };
 
 
-        ProtocolHolder * proto_node = currentFrame->p_ref->First();
-
-        int tab_index = 2;
-        for (; proto_node; proto_node = proto_node->next)
-        {
-            bool is_valid = false;
-            BaseTabWidget * basic_tab = nullptr;
-            ParentArea * mwidget = nullptr;
-            TabType type;
-            switch (proto_node->type)
-            {
-            case CurrentIPv4:
-            {
-                tabs[tab_index] = new GenericTab(TabType::V4, &value, proto_node);
-                basic_tab = tabs[tab_index]->getTab()->v4;
-                mwidget = tabs[tab_index]->getMainWidget();
-                is_valid = true;
-                tabsAllocated++;
-                type = TabType::V4;
-                break;
-            }
-            case CurrentARP:
-            {
-                tabs[tab_index] = new GenericTab(TabType::ARP, &value, proto_node);
-                basic_tab = tabs[tab_index]->getTab()->_arp;
-                mwidget = tabs[tab_index]->getMainWidget();
-                is_valid = true;
-                tabsAllocated++;
-                type = TabType::ARP;
-                break;
-            }
-            case CurrentTCP:
-            {
-                tabs[tab_index] = new GenericTab(TabType::TCP, &value, proto_node);
-                basic_tab = tabs[tab_index]->getTab()->_tcp;
-                mwidget = tabs[tab_index]->getMainWidget();
-                is_valid = true;
-                tabsAllocated++;
-                type = TabType::TCP;
-                break;
-            }
-            case CurrentUDP:
-            {
-                tabs[tab_index] = new GenericTab(TabType::UDP, &value, proto_node);
-                basic_tab = tabs[tab_index]->getTab()->_udp;
-                mwidget = tabs[tab_index]->getMainWidget();
-                is_valid = true;
-                tabsAllocated++;
-                type = TabType::UDP;
-                break;
-            }
-            case CurrentICMP:
-            {
-                tabs[tab_index] = new GenericTab(TabType::ICMP, &value, proto_node);
-                basic_tab = tabs[tab_index]->getTab()->_icmp;
-                mwidget = tabs[tab_index]->getMainWidget();
-                is_valid = true;
-                tabsAllocated++;
-                type = TabType::ICMP;
-                break;
-            }
-            case CurrentDNS:
-            {
-                tabs[tab_index] = new GenericTab(TabType::DNS, &value, proto_node);
-                basic_tab = tabs[tab_index]->getTab()->_dns;
-                mwidget = tabs[tab_index]->getMainWidget();
-                is_valid = true;
-                tabsAllocated++;
-                type = TabType::DNS;
-                break;
-            }
-
-            default: is_valid = false;
-
-            }
-
-            if (is_valid)
-            {
-                basic_tab->commit();
-                ui->ProtoDetailWidget->addTab(mwidget, __getProtocolName(type));
-                tab_index++;
-            }
-
-        }
-
-        hex_view->setData(currentFrame->copy, currentFrame->cap_len);
-    }
 
 
-    //qDebug() << tabsAllocated << '\n';
+    //     ProtocolHolder * proto_node = current_frame_->p_ref->First();
+
+    //     int tab_index = 2;
+    //     for (; proto_node; proto_node = proto_node->next)
+    //     {
+    //         bool is_valid = false;
+    //         BaseTabWidget * basic_tab = nullptr;
+    //         ParentArea * mwidget = nullptr;
+    //         TabType type;
+    //         switch (proto_node->type)
+    //         {
+    //         case CurrentIPv4:
+    //         {
+    //             tabs[tab_index] = new GenericTab(TabType::V4, &value, proto_node);
+    //             basic_tab = tabs[tab_index]->getTab()->v4;
+    //             mwidget = tabs[tab_index]->getMainWidget();
+    //             is_valid = true;
+    //             tabsAllocated++;
+    //             type = TabType::V4;
+    //             break;
+    //         }
+    //         case CurrentARP:
+    //         {
+    //             tabs[tab_index] = new GenericTab(TabType::ARP, &value, proto_node);
+    //             basic_tab = tabs[tab_index]->getTab()->_arp;
+    //             mwidget = tabs[tab_index]->getMainWidget();
+    //             is_valid = true;
+    //             tabsAllocated++;
+    //             type = TabType::ARP;
+    //             break;
+    //         }
+    //         case CurrentTCP:
+    //         {
+    //             tabs[tab_index] = new GenericTab(TabType::TCP, &value, proto_node);
+    //             basic_tab = tabs[tab_index]->getTab()->_tcp;
+    //             mwidget = tabs[tab_index]->getMainWidget();
+    //             is_valid = true;
+    //             tabsAllocated++;
+    //             type = TabType::TCP;
+    //             break;
+    //         }
+    //         case CurrentUDP:
+    //         {
+    //             tabs[tab_index] = new GenericTab(TabType::UDP, &value, proto_node);
+    //             basic_tab = tabs[tab_index]->getTab()->_udp;
+    //             mwidget = tabs[tab_index]->getMainWidget();
+    //             is_valid = true;
+    //             tabsAllocated++;
+    //             type = TabType::UDP;
+    //             break;
+    //         }
+    //         case CurrentICMP:
+    //         {
+    //             tabs[tab_index] = new GenericTab(TabType::ICMP, &value, proto_node);
+    //             basic_tab = tabs[tab_index]->getTab()->_icmp;
+    //             mwidget = tabs[tab_index]->getMainWidget();
+    //             is_valid = true;
+    //             tabsAllocated++;
+    //             type = TabType::ICMP;
+    //             break;
+    //         }
+    //         case CurrentDNS:
+    //         {
+    //             tabs[tab_index] = new GenericTab(TabType::DNS, &value, proto_node);
+    //             basic_tab = tabs[tab_index]->getTab()->_dns;
+    //             mwidget = tabs[tab_index]->getMainWidget();
+    //             is_valid = true;
+    //             tabsAllocated++;
+    //             type = TabType::DNS;
+    //             break;
+    //         }
+
+    //         default: is_valid = false;
+
+    //         }
+
+    //         if (is_valid)
+    //         {
+    //             basic_tab->commit();
+    //             ui_->ProtoDetailWidget->addTab(mwidget, __getProtocolName(type));
+    //             tab_index++;
+    //         }
+
+    //     }
+
+    //     // insert data to HEX VIEW!
+    //     hex_view->hexDocument()->insert(0, current_frame_->copy);
+    // }
 
 }
 
@@ -429,12 +423,12 @@ void MainWindow::ShowDetailed(const QModelIndex & current, const QModelIndex & p
 
 void MainWindow::SetTabIndex(int index)
 {
-    selectedTab = index;
+    selected_tab_ = index;
 }
 
-void MainWindow::SetFilter()
+void MainWindow::SetFilterAuto()
 {
-    QString expr = ui->filterExpr->text();
+    QString expr = ui_->filterExpr->text();
     if (expr.isEmpty())
     {
         emit FilterTriggered(expr, false);
@@ -445,20 +439,21 @@ void MainWindow::SetFilter()
 
     }
 
-    if (tabsAllocated)
+    if (tabs_alloc_total)
     {
-        FreeAllTabs();
+        _FreeAllTabs();
     }
-    hex_view->reset();
+
+    hex_view->hexDocument()->reset();
 }
 
 void MainWindow::ToNext()
 {
 
-    auto onViewModel = ui->PacketView->model();
+    auto onViewModel = ui_->PacketView->model();
     if (onViewModel)
     {
-        QItemSelectionModel * selectionModel = ui->PacketView->selectionModel();
+        QItemSelectionModel * selectionModel = ui_->PacketView->selectionModel();
         QModelIndex current = selectionModel->currentIndex();
         QModelIndex next = onViewModel->index(current.row() + 1, current.column());
 
@@ -469,10 +464,10 @@ void MainWindow::ToNext()
 
 void MainWindow::ToPrevious()
 {
-    auto onViewModel = ui->PacketView->model();
+    auto onViewModel = ui_->PacketView->model();
     if (onViewModel)
     {
-        QItemSelectionModel * selectionModel = ui->PacketView->selectionModel();
+        QItemSelectionModel * selectionModel = ui_->PacketView->selectionModel();
         QModelIndex current = selectionModel->currentIndex();
         QModelIndex prev = onViewModel->index(current.row() - 1, current.column());
 
@@ -481,49 +476,35 @@ void MainWindow::ToPrevious()
     }
 }
 
-void MainWindow::proxySetTotalCount()
+
+void MainWindow::ResetHexPanel()
 {
-    //metaPanel->setTotalCountInt(sortingModel->sourceModel()->rowCount());
+    GetHexPanel()->hexDocument()->reset();
 }
 
-void MainWindow::proxySetPercentCount(float ncount)
+void MainWindow::ResetProtoViewPanel()
 {
-    //metaPanel->setPercentCountInt(ncount);
+    // if (tabsAllocated > 0)
+    // {
+    //     FreeAllTabs();
+    // }
 }
 
-void MainWindow::proxyRefilter(const QString & pattern, bool enable_filter)
+void MainWindow::ReconnectSelectionSignals()
 {
-    //sortingModel->refilterAlreadyFiltered();
-}
-
-void MainWindow::resetHexPanel()
-{
-    getHexPanel()->reset();
-}
-
-void MainWindow::resetProtoViewPanel()
-{
-    if (tabsAllocated > 0)
-    {
-        FreeAllTabs();
-    }
-}
-
-void MainWindow::reconnect_selection_signals()
-{
-    QItemSelectionModel * selectionModel = ui->PacketView->selectionModel();
+    QItemSelectionModel * selectionModel = ui_->PacketView->selectionModel();
     connect(selectionModel, &QItemSelectionModel::currentRowChanged, this, &MainWindow::ShowDetailed);
-    connect(ui->PacketView, &QTableView::clicked, this, &MainWindow::ShowPacketDetailed);
+    connect(ui_->PacketView, &QTableView::clicked, this, &MainWindow::ShowPacketDetailed);
 }
 
-void MainWindow::sort(int index, Qt::SortOrder order)
+void MainWindow::SortPackets(int index, Qt::SortOrder order)
 {
 
 }
 
-void MainWindow::updateCount()
+void MainWindow::UpdatePacketCountAuto()
 {
-    auto model = sortingModel->sourceModel();
+    auto model = sorting_model_->sourceModel();
     size_t count = 0;
 
     if (model)
@@ -531,12 +512,12 @@ void MainWindow::updateCount()
         count = model->rowCount();
     }
 
-    metaPanel->setTotalCount(count);
+    meta_panel_->setTotalCount(count);
 }
 
-void MainWindow::updateChunkCount()
+void MainWindow::UpdateChunkCountAuto()
 {
-    auto model = ui->PacketView->model();
+    auto model = ui_->PacketView->model();
     size_t count = 0;
 
     if (model)
@@ -544,105 +525,104 @@ void MainWindow::updateChunkCount()
         count = model->rowCount();
     }
 
-    metaPanel->setChunkCount(count);
+    meta_panel_->setChunkCount(count);
 }
 
-void MainWindow::calculateMetrics()
+void MainWindow::CalculateMetricsAuto()
 {
-    updateCount();
-    updateChunkCount();
-    auto counts_ = getCurrentCounts();
-    updatePercents(static_cast<float>(counts_.first), static_cast<float>(counts_.second));
+    UpdatePacketCountAuto();
+    UpdateChunkCountAuto();
+    auto counts_ = _GetCurrentCounts();
+    UpdatePercent(static_cast<float>(counts_.first), static_cast<float>(counts_.second));
 
     QFile cpt_file{};
-    cpt_file.setFileName(file_path);
+    cpt_file.setFileName(file_path_);
     cpt_file.open(QIODevice::ReadOnly);
-    metaPanel->updateFileInfo(cpt_file);
+    meta_panel_->updateFileInfo(cpt_file);
 }
 
-void MainWindow::updatePercents(float total, float chunk)
+void MainWindow::UpdatePercent(float total, float chunk)
 {
     const float percent = PacketTableModel::calculatePercent(total, chunk);
-    metaPanel->setPercentCount(percent);
+    meta_panel_->setPercentCount(percent);
 }
 
 void MainWindow::CheckCurrentModelDataValidity(const size_t size, const size_t cap)
 {
     if (size == cap)
     {
-        locked_for_view = true;
+        locked_for_view_ = true;
     }
     else
     {
-        locked_for_view = false;
+        locked_for_view_ = false;
     }
 }
 
 void MainWindow::DetachModel()
 {
-    ui->PacketView->setModel(nullptr);
-    hex_view->reset();
-    if (tabsAllocated) FreeAllTabs();
+    ui_->PacketView->setModel(nullptr);
+    //hex_view->reset();
+    hex_view->hexDocument()->reset();
+    //if (tabs_alloc_total) FreeAllTabs();
 }
 
 void MainWindow::AttachModel()
 {
-    ui->PacketView->setModel(sortingModel);
-    reconnect_selection_signals();
-    ui->PacketView->setSortingEnabled(true);
+    ui_->PacketView->setModel(sorting_model_);
+    ReconnectSelectionSignals();
+    ui_->PacketView->setSortingEnabled(true);
 }
 
 void MainWindow::ResetAll()
 {
     DetachModel();
-    metaPanel->setTotalCount(0);
-    metaPanel->setChunkCount(0);
-    metaPanel->setPercentCount(0.0f);
+    meta_panel_->setTotalCount(0);
+    meta_panel_->setChunkCount(0);
+    meta_panel_->setPercentCount(0.0f);
 
-    metaPanel->addWarning("Resetting model ...");
+    meta_panel_->addWarning("Resetting model ...");
 }
 
 void MainWindow::SetupAll()
 {
     AttachModel();
-    calculateMetrics();
-    metaPanel->removeWarning();
+    CalculateMetricsAuto();
+    meta_panel_->removeWarning();
 }
 
-SortingProxyModel *MainWindow::getSortingModel()
+SortingProxyModel *MainWindow::GetSortingModel()
 {
-    return sortingModel;
+    return sorting_model_;
 }
 
-MyHexView *MainWindow::getHexPanel()
+QHexView *MainWindow::GetHexPanel()
 {
     return hex_view;
 }
 
-void MainWindow::SetFont(const QFont &_font)
+void MainWindow::_SetFont(const QFont &_font)
 {
-    auto header_font = QFont("Sans Serif", 8);
-    header_font.setStyleHint(QFont::SansSerif);
-    ui->PacketView->setFont(_font);
-    ui->PacketView->horizontalHeader()->setFont(header_font);
+    ui_->PacketView->setFont(_font);
+    ui_->PacketView->horizontalHeader()->setFont(_font);
 }
 
-void MainWindow::FreeAllTabs() noexcept
+void MainWindow::_FreeAllTabs() noexcept
 {
-    for (unsigned i = 0; i < tabsAllocated; i++) delete tabs[i];
-    tabsAllocated = 0;
-    ui->ProtoDetailWidget->clear();
+    // for (unsigned i = 0; i < tabsAllocated; i++) delete tabs[i];
+    // tabsAllocated = 0;
+    // ui_->ProtoDetailWidget->clear();
 }
 
-bool MainWindow::is_locked() const
+bool MainWindow::IsLocked() const
 {
-    return locked_for_view;
+    return locked_for_view_;
 }
 
-QPair<size_t, size_t> MainWindow::getCurrentCounts()
+QPair<size_t, size_t> MainWindow::_GetCurrentCounts()
 {
-    auto srcModel = sortingModel->sourceModel();
-    auto inViewModel = ui->PacketView->model();
+    auto srcModel = sorting_model_->sourceModel();
+    auto inViewModel = ui_->PacketView->model();
 
     size_t CountInTotal = 0, CountInTable = 0;
     if (srcModel && inViewModel)
@@ -684,69 +664,65 @@ void MainWindow::changeEvent(QEvent *event)
 
 MainWindow::~MainWindow()
 {
-    delete ui;
+    delete ui_;
 }
 
-void MainWindow::openForReadDump()
+void MainWindow::OpenForReadDump()
 {
-    captureManager->LoadCaptureFile();
+    capture_manager_->LoadCaptureFile();
 }
 
-void MainWindow::updateFileInfo()
+void MainWindow::UpdateFileInfo()
 {
-    CaptureSettings->prepareFile();
-    file_name = CaptureSettings->getFilename();
-    file_path = CaptureSettings->getFullPath();
+    cap_settings->prepareFile();
+    file_name_ = cap_settings->getFilename();
+    file_path_ = cap_settings->getFullPath();
 
-    QFile cpt_file{};
-    cpt_file.setFileName(file_path);
+    QFile cpt_file;
+    cpt_file.setFileName(file_path_);
     cpt_file.open(QIODevice::ReadOnly);
-    metaPanel->updateFileInfo(cpt_file);
+    meta_panel_->updateFileInfo(cpt_file);
 }
 
 void MainWindow::CreateMessageBox(const QString &title, const QString &description, const QIcon &ico)
 {
-    QMessageBox alert;
-    alert.setText(description);
-    alert.setWindowTitle(title);
-    alert.setWindowIcon(ico);
-    alert.exec();
+    QMessageBox(QMessageBox::Icon::Information, title, description).exec();
 }
 
-void MainWindow::startup()
+void MainWindow::Startup()
 {
-    const InterfaceItem * item = CaptureSettings->getTableView()->getSelectedItem();
-    setInterface(item);
-    CaptureSettings->hide();
-    captureManager->setInterface(&currentInterface);
-    CaptureSettings->prepareFile();
+    cap_settings->hide();
 
-    file_name = CaptureSettings->getFilename();
-    file_path = CaptureSettings->getFullPath();
+    const InterfaceItem * item = cap_settings->getTableView()->getSelectedItem();
+    SetInterface(item);
+    capture_manager_->SetInterface(item);
+    cap_settings->prepareFile();
 
-    captureManager->setFileWritePath(file_path);
-    metaPanel->addFileName(file_name);
-    captureManager->StartCapture();
+    file_name_ = cap_settings->getFilename();
+    file_path_ = cap_settings->getFullPath();
+
+    capture_manager_->SetDumpWritePath(file_path_);
+    meta_panel_->addFileName(file_name_);
+    capture_manager_->StartCapture();
 }
 
-void MainWindow::setInterface(const InterfaceItem *_interface)
+void MainWindow::SetInterface(const InterfaceItem *_interface)
 {
-    currentInterface = _interface;
+    current_interface_ = _interface;
 }
 
-void MainWindow::setProgramInformation(SessionManager::CaptureStatus status)
+void MainWindow::SetCaptureStatus(SessionManager::CaptureStatus status)
 {
     QString statusTitle;
     if (status == SessionManager::CaptureStatus::Started)
     {
-        auto link_type = pcap_datalink(captureManager->getOpenHandle());
+        auto link_type = pcap_datalink(capture_manager_->GetRawCaptureHandle());
         statusTitle = "Проводится захват";
 
-        if (currentInterface)
+        if (current_interface_)
         {
             statusTitle += tr(" Тип устройства: [ ");
-            DeviceType type = currentInterface->getType();
-            switch (type)
+            switch (current_interface_->GetType())
             {
             case DeviceType::Unknown: statusTitle += tr("Неизвестное устройство"); break;
             case DeviceType::Ethernet: statusTitle += tr("Ethernet"); break;
@@ -755,8 +731,8 @@ void MainWindow::setProgramInformation(SessionManager::CaptureStatus status)
             case DeviceType::Other: statusTitle+= tr("Другое"); break;
             }
 
-            statusTitle += QString(" ] имя: %1").arg(currentInterface->getFriendlyName());
-            metaPanel->setDeviceName(currentInterface->getFriendlyName());
+            statusTitle += QString(" ] имя: %1").arg(current_interface_->GetFriendlyName());
+            meta_panel_->setDeviceName(current_interface_->GetFriendlyName());
         }
         SetEnabledCaptureOptions(false);
         SetEnabledStopCapture(true);
@@ -764,8 +740,8 @@ void MainWindow::setProgramInformation(SessionManager::CaptureStatus status)
     }
     else
     {
-        locked_for_view = false;
-        sortingModel->setLock(false);
+        locked_for_view_ = false;
+        sorting_model_->setLock(false);
         statusTitle = tr("Захват остановлен");
         SetEnabledCaptureOptions(true);
         SetEnabledStopCapture(false);

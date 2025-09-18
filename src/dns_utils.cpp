@@ -2,13 +2,13 @@
 #include "helpers.h"
 #include <string>
 
-size_t ParseAnswer(const uint8_t* a_data, const uint8_t * dns_begin, DnsAnswer* answer)
+std::ptrdiff_t ParseAnswer(const uint8_t* aAddr, DnsAnswer* answer)
 {
-    auto off = (uint16_t*)a_data; // 2
-    auto type = (uint16_t*)(a_data + 2); // 2
-    auto cl = (uint16_t*)(a_data + 4); // 2
-    auto ttl = (uint32_t*)(a_data + 6); // 4
-    auto len = (uint16_t*)(a_data + 10); // 2
+    auto off = (uint16_t*)aAddr; // 2
+    auto type = (uint16_t*)(aAddr+ 2); // 2
+    auto cl = (uint16_t*)(aAddr + 4); // 2
+    auto ttl = (uint32_t*)(aAddr + 6); // 4
+    auto len = (uint16_t*)(aAddr + 10); // 2
     in_addr* hostaddr = nullptr;
     const uint8_t* hostname;
     const uint8_t* cname_ = nullptr;
@@ -21,14 +21,14 @@ size_t ParseAnswer(const uint8_t* a_data, const uint8_t * dns_begin, DnsAnswer* 
 
     auto nlen = ntohs(*len);
 
-    auto data = a_data + DNS_ANSWER_MEMBER_CONST_SIZE;
+    auto data = aAddr + DNS_ANSWER_MEMBER_CONST_SIZE;
 
-    auto name_data = (dns_begin + (DNS_NAME_OFFCALC(answer->offset))); // skip leading dot .
+    auto name_data = (aAddr + (DNS_NAME_OFFCALC(answer->offset))); // skip leading dot .
 
     int it_name = 0;
     for (; *name_data++ != '\0';)
     {
-        if (IsPrintable(name_data)) answer->name[it_name] = *name_data;
+        if (isPrintable(*name_data)) answer->name[it_name] = *name_data;
         else answer->name[it_name] = '.';
         it_name++;
     }
@@ -43,9 +43,7 @@ size_t ParseAnswer(const uint8_t* a_data, const uint8_t * dns_begin, DnsAnswer* 
             auto lendian_value = ntohs(*offsz);
             auto value = (lendian_value & 255);
 
-            cname_ = dns_begin + value;
-
-
+            cname_ = aAddr + value;
         }
         else if (answer->length == 4)
         {
@@ -67,7 +65,7 @@ size_t ParseAnswer(const uint8_t* a_data, const uint8_t * dns_begin, DnsAnswer* 
         int j = 0;
         for (; *cname_ != '\0'; cname_++)
         {
-            if (IsPrintable(cname_))
+            if (isPrintable(*cname_))
                 answer->adata.cname.data[j] = *cname_;
             else answer->adata.cname.data[j] = '.';
             j++;
@@ -79,7 +77,7 @@ size_t ParseAnswer(const uint8_t* a_data, const uint8_t * dns_begin, DnsAnswer* 
         int i;
         for (i = 0; i < answer->length; i++)
         {
-            if (IsPrintable(data))
+            if (isPrintable(*data))
                 answer->adata.cname.data[i] = *data;
             else answer->adata.cname.data[i] = '.';
             data++;
@@ -91,32 +89,20 @@ size_t ParseAnswer(const uint8_t* a_data, const uint8_t * dns_begin, DnsAnswer* 
 
 }
 
-size_t ParseQuestion(const uint16_t q_count, const uint8_t* n_data_dns, DnsQuestion * question)
+std::ptrdiff_t ParseQuestion(const uint8_t* qaddr, DnsQuestion * question)
 {
-
-    const uint8_t* qaddr = (n_data_dns + DNS_HEADER_SIZE);
-    int name_offset = 0;
-    const uint8_t* q_addr_begin = qaddr;
-    QByteArray dirty_name;
-    while (true)
+    while (*qaddr)
     {
-        if (*qaddr == '\0') break;
-        if (IsPrintable(qaddr)) dirty_name.push_back(*qaddr);
-        else dirty_name += '.';
-        name_offset++;
+        if (isPrintable(*qaddr))
+            question->name += *qaddr;
+        else question->name += '.';
         qaddr++;
     }
 
-    const uint8_t* field_type = q_addr_begin + name_offset + 1;
-    const uint8_t* field_class = q_addr_begin + name_offset + 3;
-    auto t_value = (uint16_t*)(field_type);
-    auto c_value = (uint16_t*)(field_class);
+    const uint8_t* field_type = qaddr + question->name.size() + 1;
+    const uint8_t* field_class = qaddr + question->name.size() + 3;
 
-    question->type = ntohs(*t_value);
-    question->cl_name = ntohs(*c_value);
-    question->name = dirty_name.isEmpty() ? QByteArray() : dirty_name.sliced(1, dirty_name.size() - 1);
-    //question->name[i] = '\0';
-    //question->name++; // skip leading dot;
-
-    return name_offset + 5;
+    question->type = ntohs(*(uint16_t*)(field_type));
+    question->cl_name = ntohs(*(uint16_t*)(field_class));
+    return question->name.size() + 5;
 }

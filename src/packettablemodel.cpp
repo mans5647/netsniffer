@@ -1,215 +1,113 @@
-#include "packettablemodel.h"
-#include "uihelpers.h"
 #include <QVariant>
 #include <QMutex>
 #include <QSize>
+#include <QDateTime>
+#include <memory>
+#include "packettablemodel.h"
 #include "protocolparser.h"
 
-PacketTableModel::PacketTableModel(const PacketTableModel & other) : QAbstractListModel()
-{
-    frames = other.frames;
-    frames.squeeze();
-}
 
 PacketTableModel::PacketTableModel()
 {
-    locker = new QMutex();
-
-
-
+    locker = std::unique_ptr<QMutex>(new QMutex());
 }
 
 PacketTableModel::~PacketTableModel() noexcept
 {
-    frames.clear();
+    packets.clear();
 }
 
 int PacketTableModel::rowCount(const QModelIndex &parent) const
 {
-    return frames.size();
+    return packets.size();
 }
 
-
+bool PacketTableModel::isEmpty()
+{
+    return rowCount() == 0;
+}
 
 QVariant PacketTableModel::data(const QModelIndex &index, int role) const
 {
     if (!index.isValid())
-        return QVariant{};
+        return {};
+
     auto row = index.row();
 
-    if (row >= frames.size() || row < 0) return QVariant{};
+    if (row >= packets.size() || row < 0) return {};
 
     QVariant value{};
 
-    if (role == Qt::DisplayRole)
-    {
-        switch (index.column())
-        {
-        case COLUMN_NO:
-        {
-            value = QVariant(frames.at(row).f_num);
+    if (role == Qt::DisplayRole) {
+
+        switch (index.column()) {
+        case COLUMN_NO: {
+            value = QVariant(packets.at(row).GetId());
             break;
-        }
-        case COLUMN_DIFF_TIME:
-        {
-
-            auto stamp = frames.at(row).recv_time;
-
-            auto tval = std::localtime(&stamp);
-
-            QTime fmt_time{tval->tm_hour, tval->tm_min, tval->tm_sec};
-
-            QString fmt_str = fmt_time.toString();
-
-            value = QVariant(fmt_str);
+        } case COLUMN_DIFF_TIME: {
+            auto recv_time = packets.at(row).GetReceiveTime();
+            value = QVariant(QDateTime::fromSecsSinceEpoch(recv_time).toLocalTime().toString());
             break;
-        }
-        case COLUMN_SRC:
-        {
+        } case COLUMN_SRC: {
 
-            QString source;
+            const Packet & packet = packets.at(row);
+            const Ethernet & ethernet = packet.GetEthernet();
 
-            const Ethernet & ethernet = frames.at(row).p_ref->getEthernet();
-
-            bool result = Ethernet::hasNextProtocol(ethernet);
-
-            if (result)
-            {
-                auto holder = frames.at(row).p_ref->First();
-                auto node = GetNetLayerProto(&holder);
-
-                assert(node);
-                if (node->type == CurrentARP)
-                {
-                    source = node->arp_header.ExtractSrcMac();
-                }
-                else if (node->type == CurrentIPv4)
-                {
-                    source = node->IP4_header.ExtractSrcAddr();
-                }
-
-                else if (node->type == CurrentIPv6)
-                {
-                    char addr_buf[V6_BUF_SIZE_MAX];
-                    FromIPv6Address(addr_buf, V6_BUF_SIZE_MAX, node->IP6_header.getSourceAddress());
-                    source = addr_buf;
+            if (ethernet.hasNextProtocol()) {
+                auto proto = packet.GetLayer(Network);
+                if (proto) {
+                    switch (proto->GetType()) {
+                    case CurrentIPv4: {
+                        return proto->as<IPv4Holder>()->SourceAddress().data();
+                    }
+                        case CurrentARP: return ProtocolUtility::IpAsString(proto->as<ARPHolder>()->SourceIP());
+                    }
                 }
             }
 
-            else
-            {
-                const Ethernet::Mac & ref_src =  ethernet.getSourceMac();
+            return "unknown source";
+        } case COLUMN_DST: {
+            const Packet & packet = packets.at(row);
+            const Ethernet & ethernet = packet.GetEthernet();
 
-                char mac_src[MAC_PRETTY_NAME];
-
-                sprintf_s(mac_src, MAC_PRETTY_NAME, MAC_FMT,
-                          ref_src.at(0), ref_src.at(1), ref_src.at(2), ref_src.at(3), ref_src.at(4), ref_src.at(5));
-
-                source = mac_src;
-            }
-
-            value = QVariant(source);
-            break;
-        }
-        case COLUMN_DST:
-        {
-            QString dest;
-
-            const Ethernet & ethernet = frames.at(row).p_ref->getEthernet();
-
-            bool result = Ethernet::hasNextProtocol(ethernet);
-
-
-            if (result)
-            {
-                auto holder = frames.at(row).p_ref->First();
-                auto node = GetNetLayerProto(&holder);
-
-                assert(node);
-
-
-                if (node->type == CurrentARP)
-                {
-                    dest = node->arp_header.ExtractDstMac();
-                }
-                else if (node->type == CurrentIPv4)
-                {
-                    dest = node->IP4_header.ExtractDstAddr();
-                }
-
-                else if (node->type == CurrentIPv6)
-                {
-                    char addr_buf[V6_BUF_SIZE_MAX];
-                    FromIPv6Address(addr_buf, V6_BUF_SIZE_MAX, node->IP6_header.getDestinationAddress());
-                    dest = addr_buf;
+            if (ethernet.hasNextProtocol()) {
+                auto proto = packet.GetLayer(Network);
+                if (proto) {
+                    switch (proto->GetType()) {
+                    case CurrentIPv4: {
+                        return proto->as<IPv4Holder>()->DestinationAddress().data();
+                    }
+                        case CurrentARP: return ProtocolUtility::IpAsString(proto->as<ARPHolder>()->DestinationIP());
+                    }
                 }
             }
 
-            else
-            {
-                const Ethernet::Mac & ref_dst =  ethernet.getDestinationMac();
-
-                char mac_dst[MAC_PRETTY_NAME];
-
-                sprintf_s(mac_dst, MAC_PRETTY_NAME, MAC_FMT,
-                          ref_dst.at(0), ref_dst.at(1), ref_dst.at(2), ref_dst.at(3), ref_dst.at(4), ref_dst.at(5));
-
-                dest = mac_dst;
-            }
-
-            value = QVariant(dest);
+            return "unknown destination";
             break;
-        }
-        case COLUMN_PROTO:
-        {
-            QString protoIDText;
-            const Ethernet & ethernet = frames.at(row).p_ref->getEthernet();
+        } case COLUMN_PROTO: {
 
-            bool result = Ethernet::hasNextProtocol(ethernet);
+            const Packet & packet = packets.at(row);
+            const Ethernet & ethernet = packets.end()->GetEthernet();
 
-            if (result)
-            {
-                auto _last = frames.at(row).p_ref->Last();
-                protoIDText = getLastProtocol(_last);
+            if (!packet.IsProtosEmpty()) {
+                return ProtocolUtility::NameOfProtocol(packet.Last());
             }
 
-            else
-            {
-                protoIDText = "Ethernet";
+            return "Ethernet";
+        } case COLUMN_LEN: {
+            return quint64(packets.at(row).GetActualLen());
+        } case COLUMN_INFO: {
+            const Packet & packet = packets.at(row);
+            //const Ethernet & ethernet = packet.GetEthernet();
+            if (!packet.IsProtosEmpty()) {
+                return ProtocolUtility::DescOfProtocol(packet.Last());
             }
-
-            value = QVariant(protoIDText);
-            break;
+            return "<info>";
         }
-        case COLUMN_LEN:
-        {
-            value = QVariant(frames.at(row).total_length);
-            break;
-        }
-        case COLUMN_INFO:
-        {
-            const Ethernet & ethernet = frames.at(row).p_ref->getEthernet();
-            bool result = Ethernet::hasNextProtocol(ethernet);
-            QString infoText;
-
-
-            if (result)
-            {
-                auto _last = frames.at(row).p_ref->Last();
-                infoText = getPacketInfo(_last);
-            }
-
-            else
-            {
-                infoText = "Ethernet description (not implemented 802.3)";
-            }
-
-            value = QVariant(infoText);
-            break;
-        }
-        }
+    }
 
     }
+
     return value;
 }
 
@@ -223,59 +121,33 @@ float PacketTableModel::calculatePercent(float count, float chunk_of_count)
     return (chunk_of_count / count) * 100.0f;
 }
 
-void PacketTableModel::append(const FrameInfo & frame)
+void PacketTableModel::append(Packet & packet)
 {
-    locker->lock();
-    int newRow = frames.size();
-    int lastRow = newRow;
-    beginInsertRows(QModelIndex(), lastRow, newRow);
-    emit countChanged(frames.size(), frames.capacity());
-    frames.append(frame);
+    std::size_t older = packets.size();
+    beginInsertRows(QModelIndex(), older, older);
+    packets.push_back(std::move(packet));
+    emit countChanged(packets.size(), packets.capacity());
     endInsertRows();
-    locker->unlock();
-}
-
-const FrameInfo &PacketTableModel::get(int index) const
-{
-    if (index >= frames.size())
-        return this->operator [](frames.size() - 1);
-    if (index < 0) return this->operator [](0);
-    return this->operator [](index);
-}
-
-const FrameInfo &PacketTableModel::operator [](int index) const
-{
-    return frames.at(index);
 }
 
 void PacketTableModel::clear() noexcept
 {
     beginResetModel();
-    frames.clear();
+    packets.clear();
     endResetModel();
 }
 
-PacketTableModel::ListType *PacketTableModel::get_list_ptr()
-{
-    return &frames;
-}
 
 bool PacketTableModel::removeRows(int row, int count, const QModelIndex &parent)
 {
     Q_UNUSED(parent);
 
     beginResetModel();
-    frames.resize(0);
-    frames.squeeze();
+    packets.clear();
     endResetModel();
-
     return true;
 }
 
-FrameInfo& PacketTableModel::operator [](int index)
-{
-    return frames[index];
-}
 
 QVariant PacketTableModel::headerData(int section, Qt::Orientation orientation, int role) const
 {

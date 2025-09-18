@@ -4,25 +4,25 @@
 
 InterfaceItem::InterfaceItem(pcap_if_t *source_device)
 {
-    name = QByteArray(source_device->name, std::strlen(source_device->name));
-    description = QByteArray(source_device->description, std::strlen(source_device->description));
+    name = source_device->name;
+    description = source_device->description;
 
     flags = source_device->flags;
-    m_type = DeviceType::Unknown;
+    devType = DeviceType::Unknown;
 
     if (flags & PCAP_IF_WIRELESS)
-        m_type = DeviceType::Wireless;
+        devType = DeviceType::Wireless;
     else if (flags & PCAP_IF_LOOPBACK)
-        m_type = DeviceType::Loopback;
+        devType = DeviceType::Loopback;
     else if (!(flags & PCAP_IF_WIRELESS) && !(flags & PCAP_IF_LOOPBACK))
-        m_type = DeviceType::Ethernet;
-    else m_type = DeviceType::Other;
+        devType = DeviceType::Ethernet;
+    else devType = DeviceType::Other;
 
-    pcap_addr * node = source_device->addresses;
-    while (node)
+    pcap_addr * addr = source_device->addresses;
+    while (addr)
     {
-        addresses.emplace_back(node);
-        node = node->next;
+        addresses.emplace_back(addr);
+        addr = addr->next;
     }
 
 }
@@ -33,85 +33,87 @@ InterfaceItem::InterfaceItem(InterfaceItem &&other)
     description = std::move(other.description);
     addresses = std::move(other.addresses);
     flags = other.flags;
-    m_type = other.m_type;
+    devType = other.devType;
 }
 
-bool InterfaceItem::is_running() const
+bool InterfaceItem::isRunning() const
 {
     return (flags & PCAP_IF_RUNNING);
 }
 
-DeviceType InterfaceItem::getType() const
+DeviceType InterfaceItem::GetType() const
 {
-    return m_type;
+    return devType;
 }
 
-const QByteArray &InterfaceItem::getName() const
+QString InterfaceItem::GetName() const
 {
     return name;
 }
 
-const QByteArray &InterfaceItem::getDescription() const
+QString InterfaceItem::GetDescription() const
 {
     return description;
 }
 
-QString InterfaceItem::getFriendlyName() const
+QString InterfaceItem::GetFriendlyName() const
 {
+#ifdef __linux__
+    return name;
+#else
     return friendly_name;
+#endif
 }
 
-void InterfaceItem::setFriendlyName(const QString &fname)
+void InterfaceItem::SetFriendlyName(const QString &value)
 {
-    friendly_name = fname;
+    friendly_name = value;
 }
 
-InterfaceItem::ConstIteratorType InterfaceItem::firstAddress() const
+InterfaceItem::ConstIteratorType InterfaceItem::FirstAddress() const
 {
     return addresses.cbegin();
 }
 
-
-InterfaceItem::ConstIteratorType InterfaceItem::lastAddress() const
+InterfaceItem::ConstIteratorType InterfaceItem::LastAddress() const
 {
     return addresses.cend();
 }
 
-uint32_t InterfaceItem::getFlags() const
+uint32_t InterfaceItem::GetFlags() const
 {
     return flags;
 }
 
-InterfaceItem::InterfaceAddress::InterfaceAddress(pcap_addr *src_addr)
+InterfaceItem::InterfaceAddress::InterfaceAddress(const pcap_addr *src_addr)
 {
-    sockaddr * addr_ = src_addr->addr;
-    sockaddr * nmsk = src_addr->netmask;
-    sockaddr * baddr = src_addr->broadaddr;
-    sockaddr * dst = src_addr->dstaddr;
     hasAddr = false;
     hasMask = false;
     hasBroad = false;
     hasDst = false;
 
-    if (addr_)
+    if (src_addr->addr)
     {
         hasAddr = true;
-        memcpy(&addr, addr_, sizeof(sockaddr));
+        std::memcpy(&this->addr, src_addr->addr, sizeof(sockaddr));
     }
-    if (nmsk)
+
+    if (src_addr->netmask)
     {
         hasMask = true;
-        memcpy(&netmask, nmsk, sizeof(sockaddr));
+        std::memcpy(&this->netmask, src_addr->netmask, sizeof(sockaddr));
     }
-    if (baddr)
+
+    if (src_addr->broadaddr)
     {
         hasBroad = true;
-        memcpy(&broadaddr, baddr, sizeof(sockaddr));
+        std::memcpy(&this->broadaddr, src_addr->broadaddr, sizeof(sockaddr));
     }
-    if (dst)
+
+    if (src_addr->dstaddr)
     {
         hasDst = true;
-        memcpy(&dstaddr, dst, sizeof(sockaddr));
+        std::memcpy(&this->dstaddr, src_addr->dstaddr, sizeof(sockaddr));
     }
 }
 

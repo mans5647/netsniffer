@@ -3,9 +3,6 @@
 
 DnsQuestionEntry::DnsQuestionEntry(const DnsQuestion &question)
 {
-    QWidget::QWidget(nullptr);
-
-
     nameField = new KeyValuePairWidget{};
     typeField = new KeyValuePairWidget{};
     classField = new KeyValuePairWidget{};

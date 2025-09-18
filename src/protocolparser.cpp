@@ -1,296 +1,189 @@
 #include "protocolparser.h"
-#include "dns_utils.h"
-#include <QWidget>
-#include "helpers.h"
-#include "proto_list.h"
-#include "httpparser.h"
 
-void ProtocolParser::ParseIP4(Packet * packet, const uint8_t * data)
+std::optional<Packet> ProtocolParser::Parse(int frame_id, pcap_pkthdr* header, const uint8_t* data)
 {
-    auto holder_value = ConstructHolder(packet,data, CurrentIPv4);
-    packet->push_back(&holder_value);
-}
+    Packet packet;
+    std::uint32_t net_header_size{}, transport_header_size{};
+    std::size_t payload_size = 0;
+    ParseError err = ParseError::ParseNoError;
 
-void ProtocolParser::ParseIP6(Packet * packet, const uint8_t * data)
-{
-    auto holder_value = ConstructHolder(packet,data, CurrentIPv6);
-    packet->push_back(&holder_value);
-}
+    packet.SetId(frame_id);
+    packet.SetActualLen(header->len);
+    packet.SetCaptureLen(header->caplen);
+    packet.SetReceiveTime(header->ts.tv_sec);
+    packet.SetAlternativeTime(header->ts.tv_usec);
 
-void ProtocolParser::ParseARP(Packet * packet, const uint8_t * data)
-{
-    auto holder_value = ConstructHolder(packet,data, CurrentARP);
-    packet->push_back(&holder_value);
-}
+    Ethernet ethernet{reinterpret_cast<const ether_header*>(data)};
 
+    packet.SetEthernet(std::move(ethernet));
 
 
-
-
-
-void ProtocolParser::ParseTCP(FrameInfo * frame_src, const uint8_t * data)
-{
-    auto holder_value = ConstructHolder(frame_src->p_ref, data, CurrentTCP);
-    frame_src->p_ref->push_back(&holder_value);
-}
-
-void ProtocolParser::ParseUDP(FrameInfo * frame_src, const uint8_t * data)
-{
-    auto holder_value = ConstructHolder(frame_src->p_ref, data, CurrentUDP);
-    frame_src->p_ref->push_back(&holder_value);
-}
-
-void ProtocolParser::ParseICMP(FrameInfo * frame_src, const uint8_t * data)
-{
-    auto holder_value = ConstructHolder(frame_src->p_ref, data, CurrentICMP);
-    frame_src->p_ref->push_back(&holder_value);
-}
-
-void ProtocolParser::ParseDNS(FrameInfo * frame_src, const uint8_t * data)
-{
-    auto holder_value = ConstructHolder(frame_src->p_ref, data, CurrentDNS);
-    frame_src->p_ref->push_back(&holder_value);
-}
-
-void ProtocolParser::ParseHTTP(FrameInfo * frame_src, const uint8_t * data)
-{
-    auto holder_value = ConstructHolder(frame_src->p_ref, data, CurrentHTTP);
-    frame_src->p_ref->push_back(&holder_value);
-}
-
-
-ProtocolHolder *ConstructHolder(Packet * pkt,const void * data, protocol_t type)
-{
-    auto inst = new ProtocolHolder();
-    inst->next = nullptr;
-    switch (type)
-    {
-    case CurrentIPv4:
-    {
-        inst->IP4_header = *((ip*)(const uint8_t*)data);
-        inst->type = type;
-        break;
-    }
-    case CurrentIPv6:
-    {
-        inst->IP6_header = *((ip6*)(const uint8_t*)data);
-        inst->type = type;
-        break;
-    }
-    case CurrentARP:
-    {
-        inst->arp_header = *((Arp*)(const uint8_t*)data);
-        inst->type = type;
-        break;
+    if (!packet.GetEthernet().hasNextProtocol()) {
+        return packet;
     }
 
-    case CurrentTCP:
-    {
-        inst->tcp_header = *((tcphdr*)(const uint8_t*)data);
-        inst->type = type;
-        break;
+    err = parseNetworkLayer(packet, ToNetworkLayer(data));
+
+    if (err != ParseError::ParseNoError) {
+        return std::nullopt;
     }
 
-    case CurrentUDP:
-    {
-        inst->udp_header = *((udphdr*)(const uint8_t*)data);
-        inst->type = type;
-        break;
-    }
+    net_header_size = packet.GetNetworkHeaderSize();
 
-    case CurrentICMP:
-    {
+    err = parseTransportLayer(packet, ToTransportLayer(data, net_header_size));
 
-        auto nodeLast = pkt->Last();
-        assert(nodeLast->type == CurrentIPv4);
-        inst->icmp_header = ICMPHolder::constructFromRaw((const uint8_t*)data, nodeLast->IP4_header.ExtractTotalLength());
-        inst->type = type;
-        break;
-    }
-    case CurrentDNS:
-    {
-        const uint8_t* dns_data_begin = (const uint8_t*)(data);
-        inst->dns_header = *((dnshdr*)dns_data_begin);
-        DNSHolder * tmp = &inst->dns_header;
+    if (err != ParseError::ParseNoError) {
 
-        uint16_t flags = tmp->GetFLAGS();
-        inst->dns_header.SetMessageType(flags & DNS_FLAGS_QR_MASK);
-
-
-
-        uint16_t q_count = tmp->GetNQ();
-        uint16_t a_count = tmp->GetNA();
-        uint16_t msg_type = tmp->GetMessageType();
-        if (msg_type == DNS_FLAGS_QR_REPLY)
-        {
-            auto rcode = flags & DNS_FLAGS_RCODE_MASK;
-
-
-            size_t parsed_size = 0;
-
-            if (q_count)
-            {
-                parsed_size = DNSHolder::parseAllQuestions(tmp, dns_data_begin, q_count);
-            }
-
-            switch (rcode)
-            {
-            case DNS_RCODE_NOERROR:
-            {
-                if (a_count)
-                {
-                    const uint8_t * a_section = dns_data_begin + DNS_HEADER_SIZE + parsed_size;
-
-                    DNSHolder::parseAllAnswers(tmp, a_section, dns_data_begin, a_count);
-                }
-                break;
-            }
-            case DNS_RCODE_FORMERR:
-            {
-                if (a_count)
-                {
-                    const uint8_t * a_section = dns_data_begin + DNS_HEADER_SIZE + parsed_size;
-                    DNSHolder::parseAllAnswers(tmp, a_section, dns_data_begin, a_count);
-                }
-                break;
-            }
-            case DNS_RCODE_SFAIL:
-            {
-                if (a_count)
-                {
-                    const uint8_t * a_section = dns_data_begin + DNS_HEADER_SIZE + parsed_size;
-                    DNSHolder::parseAllAnswers(tmp, a_section, dns_data_begin, a_count);
-                }
-                break;
-            }
-            case DNS_RCODE_NXDOMAIN:
-            {
-                if (a_count)
-                {
-                    const uint8_t * a_section = dns_data_begin + DNS_HEADER_SIZE + parsed_size;
-                    DNSHolder::parseAllAnswers(tmp, a_section, dns_data_begin, a_count);
-                }
-                break;
-            }
-            case DNS_RCODE_NIMPL:
-            {
-                if (a_count)
-                {
-                    const uint8_t * a_section = dns_data_begin + DNS_HEADER_SIZE + parsed_size;
-                    DNSHolder::parseAllAnswers(tmp, a_section, dns_data_begin, a_count);
-                }
-                break;
-            }
-            case DNS_RCODE_REFUSED:
-            {
-                if (a_count)
-                {
-                    const uint8_t * a_section = dns_data_begin + DNS_HEADER_SIZE + parsed_size;
-                    DNSHolder::parseAllAnswers(tmp, a_section, dns_data_begin, a_count);
-                }
-                break;
-            }
-            }
-        }
-        else
-        {
-            if (q_count)
-            {
-                tmp->AllocateQuestions();
-                DnsQuestion * questions_ref = tmp->GetQuestions();
-
-                int index = 0;
-                ParseQuestion(q_count, dns_data_begin, &questions_ref[index]);
-            }
+        if (err == ParseError::ParseErrorFinish) {
+            return packet;
         }
 
-        inst->type = type;
-        break;
+        return std::nullopt;
     }
 
-    case CurrentHTTP:
-    {
-        inst->type = type;
-        break;
+    // set payload size to UDP or TCP
+
+    // first, get layers
+    ProtocolHolder * net_proto = packet.GetLayer(Network);
+    ProtocolHolder * tran_proto = packet.GetLayer(Transport);
+    if (net_proto->GetType() == CurrentIPv4) {
+        payload_size = net_proto->as<IPv4Holder>()->TotalLength() -
+                (net_header_size + transport_header_size);
     }
 
-    }
-    return inst;
-}
-
-
-
-int GetPayloadSize(ProtocolHolder * net_value, uint16_t nethdrsz, uint16_t trshdrsz, protocol_t type)
-{
-    int write_size = 0;
-    switch (type)
-    {
-    case CurrentIPv4:
-    {
-        write_size = (net_value->IP4_header.ExtractTotalLength()) - (nethdrsz + trshdrsz);
-        break;
-    }
-    case CurrentIPv6:
-    {
-
-        break;
-    }
-    default:
-        break;
-    }
-    return write_size;
-}
-
-ProtocolHolder *GetProtoOfType(ProtocolHolder ** head, protocol_t required)
-{
-    ProtocolHolder * itr = (*head);
-    while (itr->next)
-    {
-        if (itr->type == required) return itr;
-        itr = itr->next;
-    }
-
-    return nullptr;
-}
-
-ProtocolHolder *GetNetLayerProto(ProtocolHolder ** head)
-{
-    ProtocolHolder * itr = (*head);
-    assert(itr != nullptr);
-
-    while (itr)
-    {
-        switch (itr->type)
-        {
-            case CurrentIPv4:
-            case CurrentIPv6:
-            case CurrentARP:
-            {
-                return itr;
-            }
+    if (tran_proto) {
+        if (tran_proto->GetType() == CurrentTCP) {
+            tran_proto->as<TCPHolder>()->SetPayloadSize(payload_size);
+        } else if (tran_proto->GetType() == CurrentUDP) {
+            tran_proto->as<UDPHolder>()->SetPayloadLength(payload_size);
         }
-        itr = itr->next;
     }
 
-    return nullptr;
+
+    return packet;
 }
 
-ProtocolHolder *GetTransportLayerProto(ProtocolHolder ** head)
+ParseError ProtocolParser::parseNetworkLayer(Packet & packet, const uint8_t * data)
 {
-    ProtocolHolder * itr = (*head);
-    while (itr)
-    {
-        switch (itr->type)
+    switch (packet.GetEthernet().EtherType()) {
+        case H_PROTO_ARP: {
+            packet.AddLayer(ProtocolHolderFactory::CreateNewArp(data));
+            break;
+        }
+        case H_PROTO_IP4: {
+            packet.AddLayer(ProtocolHolderFactory::CreateNewV4(data));
+            break;
+        }
+        case H_PROTO_IP6: {
+            packet.AddLayer(ProtocolHolderFactory::CreateNewV6(data));
+            break;
+        }
+    }
+
+    return ParseError::ParseNoError;
+}
+
+ParseError ProtocolParser::parseTransportLayer(Packet & packet, const uint8_t * data)
+{
+    const ProtocolHolder * proto = packet.GetLayer(Network);
+    if (proto) {
+        switch (proto->GetType())
         {
-        case CurrentTCP:
-        case CurrentUDP:
-        case CurrentICMP:
-        {
-            return itr;
+            case CurrentIPv4: {
+                const IPv4Holder * ipv4 = proto->as<IPv4Holder>();
+
+                if (ipv4) {
+                    switch (ipv4->NextProtocol()) {
+                    case TCP_NEXT: {
+                        packet.AddLayer(ProtocolHolderFactory::CreateNewTcp(data));
+                        break;
+                    } case UDP_NEXT: {
+                        packet.AddLayer(ProtocolHolderFactory::CreateNewUdp(data));
+                        break;
+                    } case ICMP_NEXT: {
+                        packet.AddLayer(ProtocolHolderFactory::CreateNewIcmp(data));
+                        break;
+                    }
+                    }
+                } else return ParseError::ParseInternalError;
+
+            break;
+        } case CurrentIPv6: {
+            return ParseError::ParseErrorTempUnsupport;
+        } case CurrentARP: {
+            return ParseError::ParseErrorFinish;
         }
         }
-
-        itr = itr->next;
     }
-    return nullptr;
+
+    return ParseError::ParseNoError;
 }
+
+ParseError ProtocolParser::parseApplicationLayer(Packet & packet, const uint8_t * data)
+{
+    return ParseError::ParseNoError;
+}
+
+// int GetPayloadSize(ProtocolHolder * net_value, uint16_t nethdrsz, uint16_t trshdrsz, protocol_t type)
+// {
+//     int write_size = 0;
+//     switch (type)
+//     {
+//     case CurrentIPv4:
+//     {
+//         write_size = (net_value->IP4_header.ExtractTotalLength()) - (nethdrsz + trshdrsz);
+//         break;
+//     }
+//     case CurrentIPv6:
+//     {
+
+//         break;
+//     }
+//     default:
+//         break;
+//     }
+//     return write_size;
+// }
+
+
+// ProtocolHolder *GetNetLayerProto(ProtocolHolder ** head)
+// {
+//     ProtocolHolder * itr = (*head);
+//     assert(itr != nullptr);
+
+//     while (itr)
+//     {
+//         switch (itr->type)
+//         {
+//             case CurrentIPv4:
+//             case CurrentIPv6:
+//             case CurrentARP:
+//             {
+//                 return itr;
+//             }
+//         }
+//         itr = itr->next;
+//     }
+
+//     return nullptr;
+// }
+
+// ProtocolHolder *GetTransportLayerProto(ProtocolHolder ** head)
+// {
+//     ProtocolHolder * itr = (*head);
+//     while (itr)
+//     {
+//         switch (itr->type)
+//         {
+//         case CurrentTCP:
+//         case CurrentUDP:
+//         case CurrentICMP:
+//         {
+//             return itr;
+//         }
+//         }
+
+//         itr = itr->next;
+//     }
+//     return nullptr;
+// }

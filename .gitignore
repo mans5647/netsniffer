@@ -10,7 +10,7 @@ build/
 *.so.*
 *.dll
 *.dylib
-
+*.out
 # Qt-es
 object_script.*.Release
 object_script.*.Debug
@@ -53,7 +53,7 @@ compile_commands.json
 *creator.user*
 
 *_qmlcache.qrc
-
+*.pcap
 .qt/
 CMakeCache.txt
 CMakeFiles/
